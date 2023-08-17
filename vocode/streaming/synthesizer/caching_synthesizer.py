@@ -1,6 +1,8 @@
 import hashlib
 import os
 import re
+from pathlib import Path
+
 from typing import Any, AsyncGenerator, Callable, Optional, List, Union
 import wave
 from vocode.streaming.agent.bot_sentiment_analyser import BotSentiment
@@ -11,10 +13,9 @@ from vocode.streaming.models.synthesizer import SynthesizerConfig
 from vocode.streaming.models.transcriber import TranscriberConfig
 from vocode.streaming.synthesizer.base_synthesizer import BaseSynthesizer, FillerAudio, SynthesisResult, ChunkResult
 
-
 def save_as_wav(path, audio_data: bytes, config: Union[SynthesizerConfig, TranscriberConfig]):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "wb") as f:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(path, "wb") as wav_file:
         wav_file = wave.open(f, "wb")
         wav_file.setnchannels(1)
         assert config.audio_encoding == AudioEncoding.LINEAR16

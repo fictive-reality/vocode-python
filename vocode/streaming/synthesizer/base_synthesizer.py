@@ -94,7 +94,7 @@ class FillerAudio:
 
         async def chunk_generator(chunk_transform=lambda x: x):
             for i in range(0, len(self.audio_data), chunk_size):
-                if i + chunk_size > len(self.audio_data):
+                if i + chunk_size >= len(self.audio_data):
                     yield ChunkResult(
                         chunk_transform(self.audio_data[i:]), True
                     )
@@ -199,7 +199,7 @@ class BaseSynthesizer(Generic[SynthesizerConfigType]):
 
         async def chunk_generator(output_bytes):
             for i in range(0, len(output_bytes), chunk_size):
-                if i + chunk_size > len(output_bytes):
+                if i + chunk_size >= len(output_bytes):
                     yield ChunkResult(
                         chunk_transform(output_bytes[i:]), True
                     )

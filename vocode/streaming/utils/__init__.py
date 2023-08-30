@@ -5,6 +5,7 @@ import os
 import secrets
 from typing import Any
 import wave
+import struct
 
 from ..models.audio_encoding import AudioEncoding
 
@@ -114,3 +115,77 @@ def trim_audio(
     else:
         trimmed_audio = audio_buffer[offset_bytes : offset_bytes + duration_bytes]
     return trimmed_audio
+
+def hex_dump(byte_string, length=16):
+    """Return a hex dump of the byte string."""
+    return '\n'.join([byte_string[i:i+length].hex() for i in range(0, len(byte_string), length)])
+
+def read_wav_file(file_path):
+    """
+    Reads a WAV file and returns its byte string.
+    """
+    with open(file_path, 'rb') as file:
+        return file.read()
+
+def has_wav_header(byte_string):
+    """
+    Check if a byte string starts with a WAV header.
+    """
+    if len(byte_string) < 12:
+        return False
+    return byte_string.startswith(b'RIFF') and byte_string[8:12] == b'WAVE'
+
+def remove_wave_header(wav_byte_string):
+    """
+    Remove the WAV header from a byte string.
+    """
+    return wav_byte_string[44:]
+
+def create_wav_dict(wav_byte_string):
+    """
+    Convert a bytestring to a dictionary of values hardcoded to index positions across 44B.
+    
+    Parameters:
+    bytestring (bytearray): The bytestring to convert.
+    
+    Returns:
+    dict: Returns values.
+    """
+    wav_dict = {}
+
+    wav_dict['file_id'] = wav_byte_string[0:4]  # RIFF chunk header, big-endian
+    wav_dict['file_size'] = wav_byte_string[4:8]  # Byte format for 32-bit integer, little-endian
+    wav_dict['file_type'] = wav_byte_string[8:12]  # WAVE Header, requires 'fmt' and 'data', big-endian
+
+    wav_dict['fmt_id'] = wav_byte_string[12:16]  # fmt sub-chunk header, big-endian
+    wav_dict['fmt_size'] = wav_byte_string[16:20]  # Size of fmt, little-endian
+    wav_dict['fmt_type'] = wav_byte_string[20:22]  # Type of format, (1 is PCM), little-endian
+    wav_dict['num_channels'] = wav_byte_string[22:24]  # Number of channels, little-endian
+    wav_dict['sample_rate'] = wav_byte_string[24:28]  # Sample rate in Hz, (e.g., 44100,48000), little-endian
+    wav_dict['byte_rate'] = wav_byte_string[28:32]  # (Sample Rate * BitsPerSample * Channels)/8, little-endian
+    wav_dict['block_align'] = wav_byte_string[32:34]  # Calculate blocks, (BitsPerSample * Channels), little-endian
+    wav_dict['bits_per_sample'] = wav_byte_string[34:36]  # BitsPerSample, little-endian
+
+    wav_dict['data_id'] = wav_byte_string[36:40]  # data sub-chunk headerl, big-endian
+    wav_dict['data_size'] = wav_byte_string[40:44]  # Size of data, little-endian
+
+    return wav_dict
+
+def byte_to_int32(format_specifier: str, byte_string: bytearray):
+    """
+    Convert a bytestring to Int32 using struct.unpack
+    
+    Parameters:
+    format_specifier (str): The format specifier for struct.unpack.
+    bytestring (bytearray): The bytestring to convert.
+    
+    Returns:
+    tuple: Returns integer.
+    """
+    try:
+        return struct.unpack(format_specifier, byte_string)[0]
+
+    except struct.error as e:
+        print(f"An error occurred: {e}")
+        return None
+

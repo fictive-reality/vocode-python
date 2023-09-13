@@ -137,7 +137,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
                     self.conversation.broadcast_interrupt()
                 )
                 if self.conversation.current_transcription_is_interrupt:
-                    self.conversation.logger.debug("sending interrupt")
+                    self.conversation.logger.debug("Sending interrupt")
                 self.conversation.logger.debug("Human started speaking")
 
             transcription.is_interrupt = (
@@ -393,7 +393,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
                 )
                 item.agent_response_tracker.set()
                 self.conversation.logger.debug(
-                    "Bot reponse sent: {}".format(message_sent)
+                    "Bot response sent: {}".format(message_sent)
                 )
 
                 if self.conversation.agent.agent_config.end_conversation_on_goodbye:

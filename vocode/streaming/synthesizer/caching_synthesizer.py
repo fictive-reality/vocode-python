@@ -1,6 +1,7 @@
 import hashlib
 import os
 import re
+import logging
 from typing import Any, AsyncGenerator, Callable, Optional, List
 from vocode.streaming.agent.bot_sentiment_analyser import BotSentiment
 from vocode.streaming.models.agent import FillerAudioConfig
@@ -61,10 +62,15 @@ class AsyncGeneratorWrapper(AsyncGenerator[SynthesisResult.ChunkResult, None]):
 
 class CachingSynthesizer(BaseSynthesizer):
 
-    def __init__(self, inner_synthesizer: BaseSynthesizer, cache_path: str = "cache"):
+    def __init__(self,
+                 inner_synthesizer: BaseSynthesizer,
+                 cache_path: str = "cache",
+                 logger: Optional[logging.Logger] = None,
+                 ):
         self.should_close_session_on_tear_down = False
         self.inner_synthesizer = inner_synthesizer
         self.cache_path = cache_path
+        self.logger = logger or logging.getLogger(__name__)
         os.makedirs(self.cache_path, exist_ok=True)
     
     @property

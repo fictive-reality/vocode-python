@@ -9,6 +9,7 @@ import logging
 import time
 import typing
 import os
+import re
 
 from vocode.streaming.action.worker import ActionsWorker
 
@@ -147,6 +148,9 @@ class StreamingConversation(Generic[OutputDeviceType]):
             if transcription.is_final:
                 file_path = None
                 # If no duration, it's a text message and we don't need to handle the audio
+                self.conversation.logger.debug(f"total_audio_bytes: {self.conversation.total_audio_bytes}")
+                self.conversation.logger.debug(f"offset: {transcription.offset}")
+                self.conversation.logger.debug(f"duration: {transcription.duration}")
                 if transcription.duration:
                     file_path = f"cache/{self.conversation.id}/transcript_{len(self.conversation.transcript.event_logs)}.wav"
                     t_config = self.conversation.transcriber.get_transcriber_config()
@@ -314,6 +318,11 @@ class StreamingConversation(Generic[OutputDeviceType]):
                     AgentResponseMessage, agent_response
                 )
 
+                if not re.search(r"\w", agent_response_message.message.text):
+                    self.conversation.synthesis_enabled == False
+                    self.conversation.logger.debug("Non-alphanumeric input. Synthesis disabled.")
+                    return
+                
                 if self.conversation.filler_audio_worker is not None:
                     if (
                         self.conversation.filler_audio_worker.interrupt_current_filler_audio()
@@ -321,6 +330,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
                         await self.conversation.filler_audio_worker.wait_for_filler_audio_to_finish()
 
                 self.conversation.logger.debug("Synthesizing speech for message")
+                self.conversation.logger.debug(f"agent_response_message.message.text: {agent_response_message.message.text}")
                 synthesis_result = await self.conversation.synthesizer.create_speech(
                     agent_response_message.message,
                     self.chunk_size,

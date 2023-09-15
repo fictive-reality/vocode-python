@@ -1,7 +1,6 @@
 import hashlib
 import os
 import re
-import logging
 from typing import Any, AsyncGenerator, Callable, Optional, List
 from vocode.streaming.agent.bot_sentiment_analyser import BotSentiment
 from vocode.streaming.models.agent import FillerAudioConfig

@@ -315,19 +315,12 @@ class StreamingConversation(Generic[OutputDeviceType]):
                     AgentResponseMessage, agent_response
                 )
 
-                if not re.search(r"\w", agent_response_message.message.text):
-                    self.conversation.synthesis_enabled == False
-                    self.conversation.logger.debug("Non-alphanumeric input. Synthesis disabled.")
-                    return
-                
                 if self.conversation.filler_audio_worker is not None:
                     if (
                         self.conversation.filler_audio_worker.interrupt_current_filler_audio()
                     ):
                         await self.conversation.filler_audio_worker.wait_for_filler_audio_to_finish()
-
-                self.conversation.logger.debug("Synthesizing speech for message")
-                self.conversation.logger.debug(f"agent_response_message.message.text: {agent_response_message.message.text}")
+                
                 synthesis_result = await self.conversation.synthesizer.create_speech(
                     agent_response_message.message,
                     self.chunk_size,
@@ -373,13 +366,21 @@ class StreamingConversation(Generic[OutputDeviceType]):
                     conversation_id=self.conversation.id,
                     publish_to_events_manager=False,
                 )
-                message_sent, cut_off, duration = await self.conversation.send_speech_to_output(
-                    message.text,
-                    synthesis_result,
-                    item.interruption_event,
-                    TEXT_TO_SPEECH_CHUNK_SIZE_SECONDS,
-                    transcript_message=transcript_message,
-                )
+
+                if re.search(r"\w", message.text):
+                    message_sent, cut_off, duration = await self.conversation.send_speech_to_output(
+                        message.text,
+                        synthesis_result,
+                        item.interruption_event,
+                        TEXT_TO_SPEECH_CHUNK_SIZE_SECONDS,
+                        transcript_message=transcript_message,
+                    )
+                else:
+                    message_sent = message.text
+                    transcript_message.text = message_sent
+                    cut_off = False
+                    duration = 0
+                
                 # Only approximate duration since we don't know the exact duration of the last chunk
                 metadata["duration"] = duration
                 if synthesis_result.cached_path:

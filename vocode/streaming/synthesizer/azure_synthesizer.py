@@ -28,12 +28,13 @@ import azure.cognitiveservices.speech as speechsdk
 
 
 NAMESPACES = {
-    "": "https://www.w3.org/2001/10/synthesis",
     "mstts": "https://www.w3.org/2001/mstts",
+    "": "https://www.w3.org/2001/10/synthesis",
 }
 
-for prefix, uri in NAMESPACES.items():
-    ElementTree.register_namespace(prefix, uri)
+ElementTree.register_namespace("", NAMESPACES[""])
+ElementTree.register_namespace("mstts", NAMESPACES["mstts"])
+
 
 class WordBoundaryEventPool:
     def __init__(self):
@@ -215,9 +216,7 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
         seconds: int,
         word_boundary_event_pool: WordBoundaryEventPool,
     ) -> str:
-        
         events = word_boundary_event_pool.get_events_sorted()
-
         tree = ElementTree.fromstring(ssml)
         for event in events:
             if event["audio_offset"] > seconds:
@@ -291,8 +290,6 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
             )
         else:
             output_generator = chunk_generator(audio_data_stream)
-        self.logger.debug(f"SSML: {ssml}")
-        self.logger.debug(f"Message: {message}")
 
         return SynthesisResult(
             output_generator,

@@ -4,7 +4,7 @@ import logging
 import os
 import re
 from typing import Any, List, Optional, Tuple
-from xml.etree import ElementTree as ET
+from xml.etree import ElementTree
 import aiohttp
 from vocode import getenv
 from opentelemetry.context.context import Context
@@ -33,7 +33,7 @@ NAMESPACES = {
 }
 
 for prefix, uri in NAMESPACES.items():
-    ET.register_namespace(prefix, uri)
+    ElementTree.register_namespace(prefix, uri)
 
 class WordBoundaryEventPool:
     def __init__(self):
@@ -168,14 +168,14 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
     def create_ssml(
         self, message: str, bot_sentiment: Optional[BotSentiment] = None
     ) -> str:
-        ssml_root = ET.fromstring(
+        ssml_root = ElementTree.fromstring(
             '<speak version="1.0" xmlns="https://www.w3.org/2001/10/synthesis" xml:lang="en-US"></speak>'
         )
-        voice = ET.SubElement(ssml_root, "voice")
+        voice = ElementTree.SubElement(ssml_root, "voice")
         voice.set("name", self.voice_name)
         voice_root = voice
         if bot_sentiment and bot_sentiment.emotion:
-            styled = ET.SubElement(
+            styled = ElementTree.SubElement(
                 voice, "{%s}express-as" % NAMESPACES.get("mstts")
             )
             styled.set("style", bot_sentiment.emotion)
@@ -188,16 +188,16 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
         # for very tiny sentences, the API hangs - so we heuristically only update the silence gap
         # if there is more than one word in the sentence
         if " " in message:
-            silence = ET.SubElement(
+            silence = ElementTree.SubElement(
                 voice_root, "{%s}silence" % NAMESPACES.get("mstts")
             )
             silence.set("value", "500ms")
             silence.set("type", "Tailing-exact")
-        prosody = ET.SubElement(voice_root, "prosody")
+        prosody = ElementTree.SubElement(voice_root, "prosody")
         prosody.set("pitch", f"{self.pitch}%")
         prosody.set("rate", f"{self.rate}%")
         prosody.text = message.strip()
-        return ET.tostring(ssml_root, encoding="unicode")
+        return ElementTree.tostring(ssml_root, encoding="unicode")
 
     def synthesize_ssml(self, ssml: str) -> speechsdk.AudioDataStream:
         result = self.synthesizer.start_speaking_ssml_async(ssml).get()
@@ -218,14 +218,14 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
         
         events = word_boundary_event_pool.get_events_sorted()
 
-        tree = ET.fromstring(ssml)
+        tree = ElementTree.fromstring(ssml)
         for event in events:
             if event["audio_offset"] > seconds:
                 prosody_tag = tree.find(".//prosody")
                 if prosody_tag is not None:
                     truncated_text = message[:event["text_offset"]]
                     prosody_tag.text = truncated_text
-                    return ET.tostring(tree, encoding="unicode")
+                    return ElementTree.tostring(tree, encoding="unicode")
         return message
 
     async def create_speech(

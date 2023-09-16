@@ -192,8 +192,8 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
             silence = ElementTree.SubElement(
                 voice_root, "{%s}silence" % NAMESPACES.get("mstts")
             )
-            silence.set("value", "500ms")
-            silence.set("type", "Tailing-exact")
+            silence.set("strength", "strong")
+            silence.set("type", "Sentenceboundary")
         prosody = ElementTree.SubElement(voice_root, "prosody")
         prosody.set("pitch", f"{self.pitch}%")
         prosody.set("rate", f"{self.rate}%")

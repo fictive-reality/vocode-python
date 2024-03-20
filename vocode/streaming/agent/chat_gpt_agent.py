@@ -1,9 +1,10 @@
 import logging
-
+import os
+import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import openai
-from typing import AsyncGenerator, Optional, Tuple
+from typing import AsyncGenerator, Optional, Tuple, List
 
 import logging
 from pydantic import BaseModel
@@ -38,12 +39,10 @@ class ChatGPTAgent(RespondAgent[ChatGPTAgentConfig]):
         )
         if agent_config.azure_params:
             openai.api_type = agent_config.azure_params.api_type
-            openai.api_base = getenv("AZURE_OPENAI_API_BASE")
             openai.api_version = agent_config.azure_params.api_version
             openai.api_key = getenv("AZURE_OPENAI_API_KEY")
         else:
             openai.api_type = "open_ai"
-            openai.api_base = "https://api.openai.com/v1"
             openai.api_version = None
             openai.api_key = openai_api_key or getenv("OPENAI_API_KEY")
         if not openai.api_key:
@@ -165,8 +164,33 @@ class ChatGPTAgent(RespondAgent[ChatGPTAgentConfig]):
         else:
             chat_parameters = self.get_chat_parameters()
         chat_parameters["stream"] = True
-        stream = await openai.ChatCompletion.acreate(**chat_parameters)
-        async for message in collate_response_async(
-            openai_get_tokens(stream), get_functions=True
-        ):
-            yield BaseMessage(text=message)
+        client = openai.AsyncAzureOpenAI(
+            azure_endpoint = os.getenv("AZURE_OPENAI_API_BASE"),
+            api_key = os.getenv("AZURE_OPENAI_API_KEY"),
+            api_version = "2023-05-15"
+        )
+        response = await client.chat.completions.create(
+            model="gpt35-turbo-16k-azure-se",
+            messages=chat_parameters["messages"]
+        )
+        response_text = response.choices[0].message.content
+        response_text_by_sentence = self.smart_openai_response_chunker(response_text)
+
+        for sentence in response_text_by_sentence:
+            yield BaseMessage(text=sentence)
+
+    def smart_openai_response_chunker(self, response: str) -> List[str]:
+        """
+        We segment openai response by grammatical pauses instead of sentences.
+        This is, by the characters: ".", ",", "!" and "?".
+        """
+        response = response.replace("\n", " ")
+        response_split = re.split(r'([.,?!])', response)
+
+        response_list = []
+        for i in range(len(response_split)):
+            if response_split[i].strip() in [".", "?", "!", ",", "[StopScenario]"]:
+                response_list[-1] = response_list[-1] + response_split[i]
+            elif response_split[i].strip():
+                response_list.append(response_split[i].strip())
+        return response_list

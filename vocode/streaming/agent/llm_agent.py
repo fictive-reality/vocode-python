@@ -1,7 +1,7 @@
 import re
 from typing import AsyncGenerator, Optional, Tuple
 
-from langchain import OpenAI
+from langchain.llms.openai import OpenAI
 from typing import Generator
 import logging
 

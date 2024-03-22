@@ -20,7 +20,7 @@ class VectorDB:
             self.aiohttp_session = aiohttp.ClientSession()
             self.should_close_session_on_tear_down = True
 
-        if "azure" in openai.api_type:
+        if openai.api_type and "azure" in openai.api_type:
             self.openai_async_client = openai.AsyncAzureOpenAI(
                 azure_endpoint = os.getenv("AZURE_OPENAI_API_BASE"),
                 api_key = os.getenv("AZURE_OPENAI_API_KEY"),

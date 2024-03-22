@@ -34,7 +34,7 @@ class GoodbyeModel:
             raise ValueError("OPENAI_API_KEY must be set in environment or passed in")
         self.embeddings_cache_path = embeddings_cache_path
         self.goodbye_embeddings: Optional[np.ndarray] = None
-        if "azure" in openai.api_type:
+        if openai.api_type and "azure" in openai.api_type:
             self.openai_async_client = openai.AsyncAzureOpenAI(
                 azure_endpoint = os.getenv("AZURE_OPENAI_API_BASE"),
                 api_key = os.getenv("AZURE_OPENAI_API_KEY"),

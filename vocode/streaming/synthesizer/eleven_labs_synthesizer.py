@@ -130,10 +130,11 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
         session = self.aiohttp_session
 
         max_attempts = 3
-        delay = 1
-        backoff = 2
+        delay = 0.5
+        backoff = 1.8
 
         attempts = 0
+        response = None
         while attempts < max_attempts:
             try:
                 response = await session.request(
@@ -152,6 +153,11 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
                     attempts += 1
                 else:
                     Exception(f"ElevenLabs API returned {response.status} status code")
+            except asyncio.TimeoutError:
+                self.logger.warning("ElevenLabs timed out. Retrying after delay...")
+                time.sleep(delay)
+                delay = delay * backoff  # Increase delay for next attempt
+                attempts += 1
             except aiohttp.ClientResponseError as e:
                 raise Exception(f"ElevenLabs API returned {e.status} status code")
             except aiohttp.ClientError as e:
@@ -159,6 +165,9 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
                 raise Exception(f"An error occurred: {e}")
             except Exception as e:
                 raise Exception(f"ElevenLabs API request internal error: {e}")
+
+        if not response or not response.ok:
+            raise Exception(f"Failed to retrieve response from ElevenLabs after {attempts} tries for '{message.text}'.")
 
         if self.experimental_streaming:
             return SynthesisResult(
@@ -175,6 +184,7 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
             convert_span = tracer.start_span(
                 f"synthesizer.{SynthesizerType.ELEVEN_LABS.value.split('_', 1)[-1]}.convert",
             )
+            # Decodes MP3 into WAV
             output_bytes_io = decode_mp3(audio_data)
 
             result = self.create_synthesis_result_from_wav(

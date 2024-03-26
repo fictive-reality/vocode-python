@@ -48,6 +48,7 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
         self.optimize_streaming_latency = synthesizer_config.optimize_streaming_latency
         self.words_per_minute = 150
         self.experimental_streaming = synthesizer_config.experimental_streaming
+        self.logger = logger
 
     async def experimental_streaming_output_generator(
         self,
@@ -128,15 +129,37 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
 
         session = self.aiohttp_session
 
-        response = await session.request(
-            "POST",
-            url,
-            json=body,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=15),
-        )
-        if not response.ok:
-            raise Exception(f"ElevenLabs API returned {response.status} status code")
+        max_attempts = 3
+        delay = 1
+        backoff = 2
+
+        attempts = 0
+        while attempts < max_attempts:
+            try:
+                response = await session.request(
+                    "POST",
+                    url,
+                    json=body,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                )
+                if response.ok:
+                    break
+                elif response.status == 429:
+                    self.logger.warning("ElevenLabs' rate limit exceeded. Retrying after delay...")
+                    time.sleep(delay)
+                    delay = delay * backoff  # Increase delay for next attempt
+                    attempts += 1
+                else:
+                    Exception(f"ElevenLabs API returned {response.status} status code")
+            except aiohttp.ClientResponseError as e:
+                raise Exception(f"ElevenLabs API returned {e.status} status code")
+            except aiohttp.ClientError as e:
+                # Handle other client errors (e.g., connection errors)
+                raise Exception(f"An error occurred: {e}")
+            except Exception as e:
+                raise Exception(f"ElevenLabs API request internal error: {e}")
+
         if self.experimental_streaming:
             return SynthesisResult(
                 self.experimental_streaming_output_generator(

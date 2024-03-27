@@ -84,13 +84,13 @@ async def openai_get_tokens(gen) -> AsyncGenerator[Union[str, FunctionFragment],
         if hasattr(delta, "content") and getattr(delta, "content"):
             token = delta.content
             yield token
-        elif hasattr(delta, "function_call") and getattr(delta, "function_call"):
+        elif hasattr(delta, "tool_calls") and getattr(delta, "tool_calls"):
             yield FunctionFragment(
-                name=delta.function_call.name
-                if "name" in delta.function_call
+                name=delta.tool_calls[0].function.name
+                if (hasattr(delta.tool_calls[0].function, "name") and getattr(delta.tool_calls[0].function, "name"))
                 else "",
-                arguments=delta.function_call.arguments
-                if "arguments" in delta.function_call
+                arguments=delta.tool_calls[0].function.arguments
+                if (hasattr(delta.tool_calls[0].function, "arguments") and getattr(delta.tool_calls[0].function, "arguments"))
                 else "",
             )
 

@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import time
 from typing import Any, AsyncGenerator, Optional, Tuple, Union
 import wave
 import aiohttp
@@ -142,29 +141,24 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
                     url,
                     json=body,
                     headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=15),
+                    timeout=aiohttp.ClientTimeout(total=9),
                 )
                 if response.ok:
                     break
                 elif response.status == 429:
                     self.logger.warning("ElevenLabs' rate limit exceeded. Retrying after delay...")
-                    time.sleep(delay)
+                    await asyncio.sleep(delay)
                     delay = delay * backoff  # Increase delay for next attempt
                     attempts += 1
                 else:
                     Exception(f"ElevenLabs API returned {response.status} status code")
             except asyncio.TimeoutError:
                 self.logger.warning("ElevenLabs timed out. Retrying after delay...")
-                time.sleep(delay)
+                await asyncio.sleep(delay)
                 delay = delay * backoff  # Increase delay for next attempt
                 attempts += 1
-            except aiohttp.ClientResponseError as e:
-                raise Exception(f"ElevenLabs API returned {e.status} status code")
-            except aiohttp.ClientError as e:
-                # Handle other client errors (e.g., connection errors)
-                raise Exception(f"An error occurred: {e}")
             except Exception as e:
-                raise Exception(f"ElevenLabs API request internal error: {e}")
+                raise e
 
         if not response or not response.ok:
             raise Exception(f"Failed to retrieve response from ElevenLabs after {attempts} tries for '{message.text}'.")

@@ -148,3 +148,6 @@ if __name__ == "__main__":
 # 🌱 Documentation
 
 [docs.vocode.dev](https://docs.vocode.dev/)
+
+## Do not do or things will break
+1. We have detected a heavy dependency for synthesis and transcription with the library `audioop`. This library is deprecated in Python 3.13 and above. Hance avoid upgrading to Python >= 3.13.

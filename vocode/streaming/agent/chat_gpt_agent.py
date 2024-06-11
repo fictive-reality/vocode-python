@@ -1,24 +1,20 @@
 import logging
 import os
-import re
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 
 import openai
-from typing import AsyncGenerator, Optional, Tuple, List
-
-import logging
 
 from vocode import getenv
 from vocode.streaming.action.factory import ActionFactory
 from vocode.streaming.agent.base_agent import RespondAgent
+from vocode.streaming.agent.utils import (
+    collate_response_async,
+    format_openai_chat_messages_from_transcript,
+    openai_get_tokens,
+    vector_db_result_to_openai_chat_message,
+)
 from vocode.streaming.models.actions import FunctionCall
 from vocode.streaming.models.agent import ChatGPTAgentConfig
-from vocode.streaming.agent.utils import (
-    format_openai_chat_messages_from_transcript,
-    vector_db_result_to_openai_chat_message,
-    collate_response_async,
-    openai_get_tokens,
-)
 from vocode.streaming.models.message import BaseMessage
 from vocode.streaming.models.transcript import Transcript
 from vocode.streaming.vector_db.factory import VectorDBFactory
@@ -41,22 +37,20 @@ class ChatGPTAgent(RespondAgent[ChatGPTAgentConfig]):
             openai.api_version = agent_config.azure_params.api_version
             openai.api_key = getenv("AZURE_OPENAI_API_KEY")
             self.openai_client = openai.AzureOpenAI(
-                azure_endpoint = os.getenv("AZURE_OPENAI_API_BASE"),
-                api_key = os.getenv("AZURE_OPENAI_API_KEY"),
-                api_version = "2023-05-15"
+                azure_endpoint=os.getenv("AZURE_OPENAI_API_BASE"),
+                api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+                api_version="2023-05-15",
             )
             self.openai_async_client = openai.AsyncAzureOpenAI(
-                azure_endpoint = os.getenv("AZURE_OPENAI_API_BASE"),
-                api_key = os.getenv("AZURE_OPENAI_API_KEY"),
-                api_version = "2023-05-15"
+                azure_endpoint=os.getenv("AZURE_OPENAI_API_BASE"),
+                api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+                api_version="2023-05-15",
             )
         else:
             openai.api_type = "open_ai"
             openai.api_version = None
             openai.api_key = openai_api_key or getenv("OPENAI_API_KEY")
-            self.openai_client = openai.OpenAI(
-                api_key=os.getenv("OPENAI_API_KEY")
-            )
+            self.openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             self.openai_async_client = openai.AsyncOpenAI(
                 api_key=os.getenv("OPENAI_API_KEY")
             )
@@ -139,7 +133,9 @@ class ChatGPTAgent(RespondAgent[ChatGPTAgentConfig]):
             text = self.first_response
         else:
             chat_parameters = self.get_chat_parameters()
-            chat_completion = await self.openai_async_client.chat.completions.create(**chat_parameters)
+            chat_completion = await self.openai_async_client.chat.completions.create(
+                **chat_parameters
+            )
             text = chat_completion.choices[0].content
         self.logger.debug(f"LLM response: {text}")
         return BaseMessage(text=text), False
@@ -180,7 +176,9 @@ class ChatGPTAgent(RespondAgent[ChatGPTAgentConfig]):
         else:
             chat_parameters = self.get_chat_parameters()
         chat_parameters["stream"] = True
-        stream = await self.openai_async_client.chat.completions.create(**chat_parameters)
+        stream = await self.openai_async_client.chat.completions.create(
+            **chat_parameters
+        )
 
         async for message in collate_response_async(
             openai_get_tokens(stream), get_functions=True

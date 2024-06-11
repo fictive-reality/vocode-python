@@ -34,6 +34,7 @@ from vocode.streaming.models.actions import (
 
 from vocode.streaming.models.agent import (
     AgentConfig,
+    ChatAnthropicAgentConfig,
     ChatGPTAgentConfig,
     LLMAgentConfig,
 )
@@ -122,7 +123,7 @@ class AbstractAgent(Generic[AgentConfigType]):
     def get_cut_off_response(self) -> str:
         assert isinstance(self.agent_config, LLMAgentConfig) or isinstance(
             self.agent_config, ChatGPTAgentConfig
-        ), "Set cutoff response is only implemented in LLMAgent and ChatGPTAgent"
+        ) or isinstance(self.agent_config, ChatAnthropicAgentConfig), "Set cutoff response is only implemented in LLMAgent and ChatGPTAgent"
         assert self.agent_config.cut_off_response is not None
         on_cut_off_messages = self.agent_config.cut_off_response.messages
         assert len(on_cut_off_messages) > 0

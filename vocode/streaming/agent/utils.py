@@ -1,15 +1,13 @@
-from copy import deepcopy
 import re
+from copy import deepcopy
 from typing import (
-    Dict,
     Any,
     AsyncGenerator,
     AsyncIterable,
-    Callable,
+    Dict,
     List,
     Literal,
     Optional,
-    TypeVar,
     Union,
 )
 
@@ -69,6 +67,7 @@ async def collate_response_async(
     if function_name_buffer and get_functions:
         yield FunctionCall(name=function_name_buffer, arguments=function_args_buffer)
 
+
 async def openai_get_tokens(gen) -> AsyncGenerator[Union[str, FunctionFragment], None]:
     async for event in gen:
         choices = event.choices or []
@@ -87,12 +86,34 @@ async def openai_get_tokens(gen) -> AsyncGenerator[Union[str, FunctionFragment],
         elif hasattr(delta, "tool_calls") and getattr(delta, "tool_calls"):
             yield FunctionFragment(
                 name=delta.tool_calls[0].function.name
-                if (hasattr(delta.tool_calls[0].function, "name") and getattr(delta.tool_calls[0].function, "name"))
+                if (
+                    hasattr(delta.tool_calls[0].function, "name")
+                    and getattr(delta.tool_calls[0].function, "name")
+                )
                 else "",
                 arguments=delta.tool_calls[0].function.arguments
-                if (hasattr(delta.tool_calls[0].function, "arguments") and getattr(delta.tool_calls[0].function, "arguments"))
+                if (
+                    hasattr(delta.tool_calls[0].function, "arguments")
+                    and getattr(delta.tool_calls[0].function, "arguments")
+                )
                 else "",
             )
+
+
+async def anthropic_get_tokens(
+    gen,
+) -> AsyncGenerator[Union[str, FunctionFragment], None]:
+    async for event in gen:
+        if event.type == "content_block_stop":
+            break
+        if event.type == "content_block_start":
+            token = event.content_block.text
+            yield token
+        if event.type == "content_block_delta":
+            delta = event.delta
+            if hasattr(delta, "text") and getattr(delta, "text"):
+                token = delta.text
+                yield token
 
 
 def find_last_punctuation(buffer: str) -> Optional[int]:

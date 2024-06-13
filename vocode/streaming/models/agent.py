@@ -1,12 +1,13 @@
-from typing import List, Optional, Union
 from enum import Enum
+from typing import List, Optional, Union
+
 from langchain.prompts import PromptTemplate
-
 from pydantic import validator
-from vocode.streaming.models.actions import ActionConfig
 
+from vocode.streaming.models.actions import ActionConfig
 from vocode.streaming.models.message import BaseMessage
-from .model import TypedModel, BaseModel
+
+from .model import BaseModel, TypedModel
 from .vector_db import VectorDBConfig
 
 FILLER_AUDIO_DEFAULT_SILENCE_THRESHOLD_SECONDS = 0.5
@@ -15,7 +16,7 @@ LLM_AGENT_DEFAULT_MAX_TOKENS = 256
 LLM_AGENT_DEFAULT_MODEL_NAME = "text-curie-001"
 CHAT_GPT_AGENT_DEFAULT_MODEL_NAME = "gpt-3.5-turbo-0613"
 ACTION_AGENT_DEFAULT_MODEL_NAME = "gpt-3.5-turbo-0613"
-CHAT_ANTHROPIC_DEFAULT_MODEL_NAME = "claude-v1"
+CHAT_ANTHROPIC_DEFAULT_MODEL_NAME = "claude-3-opus-20240229"
 CHAT_VERTEX_AI_DEFAULT_MODEL_NAME = "chat-bison@001"
 AZURE_OPENAI_DEFAULT_API_TYPE = "azure"
 AZURE_OPENAI_DEFAULT_API_VERSION = "2023-03-15-preview"
@@ -130,11 +131,11 @@ class InformationRetrievalAgentConfig(
 class EchoAgentConfig(AgentConfig, type=AgentType.ECHO.value):
     pass
 
-class StaticAgentConfig(
-    AgentConfig, type=AgentType.STATIC.value
-):
+
+class StaticAgentConfig(AgentConfig, type=AgentType.STATIC.value):
     script: List[str]
     generate_responses: bool = True
+
 
 class GPT4AllAgentConfig(AgentConfig, type=AgentType.GPT4ALL.value):
     prompt_preamble: str
@@ -168,8 +169,10 @@ class RESTfulAgentOutputType(str, Enum):
 class RESTfulAgentOutput(TypedModel, type=RESTfulAgentOutputType.BASE):
     metadata: dict = {}
 
+
 class RESTfulAgentText(RESTfulAgentOutput, type=RESTfulAgentOutputType.TEXT):
     response: str
+
 
 class RESTfulAgentEnd(RESTfulAgentOutput, type=RESTfulAgentOutputType.END):
     pass

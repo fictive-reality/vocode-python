@@ -8,7 +8,6 @@ import logging
 import random
 from typing import (
     AsyncGenerator,
-    Generator,
     Generic,
     Optional,
     Tuple,
@@ -18,7 +17,6 @@ from typing import (
 )
 import typing
 from opentelemetry import trace
-from opentelemetry.trace import Span
 from vocode.streaming.action.factory import ActionFactory
 from vocode.streaming.action.phone_call_action import (
     TwilioPhoneCallAction,
@@ -29,16 +27,16 @@ from vocode.streaming.models.actions import (
     ActionInput,
     ActionOutput,
     FunctionCall,
-    FunctionFragment,
 )
 
 from vocode.streaming.models.agent import (
     AgentConfig,
+    ChatAnthropicAgentConfig,
     ChatGPTAgentConfig,
     LLMAgentConfig,
 )
 from vocode.streaming.models.message import BaseMessage
-from vocode.streaming.models.model import BaseModel, TypedModel
+from vocode.streaming.models.model import TypedModel
 from vocode.streaming.transcriber.base_transcriber import Transcription
 from vocode.streaming.utils import remove_non_letters_digits
 from vocode.streaming.utils.goodbye_model import GoodbyeModel
@@ -120,9 +118,11 @@ class AbstractAgent(Generic[AgentConfigType]):
         pass
 
     def get_cut_off_response(self) -> str:
-        assert isinstance(self.agent_config, LLMAgentConfig) or isinstance(
-            self.agent_config, ChatGPTAgentConfig
-        ), "Set cutoff response is only implemented in LLMAgent and ChatGPTAgent"
+        assert (
+            isinstance(self.agent_config, LLMAgentConfig)
+            or isinstance(self.agent_config, ChatGPTAgentConfig)
+            or isinstance(self.agent_config, ChatAnthropicAgentConfig)
+        ), "Set cutoff response is only implemented in LLMAgent, ChatGPTAgent and AnthropicAgent"
         assert self.agent_config.cut_off_response is not None
         on_cut_off_messages = self.agent_config.cut_off_response.messages
         assert len(on_cut_off_messages) > 0
@@ -222,7 +222,7 @@ class RespondAgent(BaseAgent[AgentConfigType]):
             if is_first_response:
                 agent_span_first.end()
                 is_first_response = False
-            
+
             if isinstance(response, BaseMessage):
                 if response.metadata.get("stop") == True:
                     should_stop = True
@@ -231,7 +231,8 @@ class RespondAgent(BaseAgent[AgentConfigType]):
                 if re.search(r"\w", response.text):
                     self.produce_interruptible_agent_response_event_nonblocking(
                         AgentResponseMessage(message=response),
-                        is_interruptible=self.agent_config.allow_agent_to_be_cut_off and not should_stop,
+                        is_interruptible=self.agent_config.allow_agent_to_be_cut_off
+                        and not should_stop,
                     )
                 else:
                     self.logger.warning("Got empty text response from agent, skipping")

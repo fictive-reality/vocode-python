@@ -45,8 +45,9 @@ async def collate_response_async(
 
             buffer += token
             possible_list_item = bool(re.match(r"^\d+[ .]", buffer))
-            ends_with_money = bool(re.findall(r"\$\d+.$", buffer))
-            if re.findall(
+            ends_with_money = bool(re.search(r"\$\d+.$", buffer))
+
+            if re.search(
                 list_item_ending_pattern
                 if possible_list_item
                 else sentence_endings_pattern,
@@ -113,6 +114,7 @@ async def anthropic_get_tokens(
             delta = event.delta
             if hasattr(delta, "text") and getattr(delta, "text"):
                 token = delta.text
+                token = token.lstrip("\n")
                 yield token
 
 

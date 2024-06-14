@@ -68,7 +68,6 @@ async def collate_response_async(
     if function_name_buffer and get_functions:
         yield FunctionCall(name=function_name_buffer, arguments=function_args_buffer)
 
-
 async def openai_get_tokens(gen) -> AsyncGenerator[Union[str, FunctionFragment], None]:
     async for event in gen:
         choices = event.choices or []
@@ -87,16 +86,10 @@ async def openai_get_tokens(gen) -> AsyncGenerator[Union[str, FunctionFragment],
         elif hasattr(delta, "tool_calls") and getattr(delta, "tool_calls"):
             yield FunctionFragment(
                 name=delta.tool_calls[0].function.name
-                if (
-                    hasattr(delta.tool_calls[0].function, "name")
-                    and getattr(delta.tool_calls[0].function, "name")
-                )
+                if (hasattr(delta.tool_calls[0].function, "name") and getattr(delta.tool_calls[0].function, "name"))
                 else "",
                 arguments=delta.tool_calls[0].function.arguments
-                if (
-                    hasattr(delta.tool_calls[0].function, "arguments")
-                    and getattr(delta.tool_calls[0].function, "arguments")
-                )
+                if (hasattr(delta.tool_calls[0].function, "arguments") and getattr(delta.tool_calls[0].function, "arguments"))
                 else "",
             )
 

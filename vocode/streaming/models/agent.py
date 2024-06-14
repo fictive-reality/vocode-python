@@ -1,13 +1,12 @@
-from enum import Enum
 from typing import List, Optional, Union
-
+from enum import Enum
 from langchain.prompts import PromptTemplate
+
 from pydantic import validator
-
 from vocode.streaming.models.actions import ActionConfig
-from vocode.streaming.models.message import BaseMessage
 
-from .model import BaseModel, TypedModel
+from vocode.streaming.models.message import BaseMessage
+from .model import TypedModel, BaseModel
 from .vector_db import VectorDBConfig
 
 FILLER_AUDIO_DEFAULT_SILENCE_THRESHOLD_SECONDS = 0.5
@@ -131,11 +130,11 @@ class InformationRetrievalAgentConfig(
 class EchoAgentConfig(AgentConfig, type=AgentType.ECHO.value):
     pass
 
-
-class StaticAgentConfig(AgentConfig, type=AgentType.STATIC.value):
+class StaticAgentConfig(
+    AgentConfig, type=AgentType.STATIC.value
+):
     script: List[str]
     generate_responses: bool = True
-
 
 class GPT4AllAgentConfig(AgentConfig, type=AgentType.GPT4ALL.value):
     prompt_preamble: str
@@ -169,10 +168,8 @@ class RESTfulAgentOutputType(str, Enum):
 class RESTfulAgentOutput(TypedModel, type=RESTfulAgentOutputType.BASE):
     metadata: dict = {}
 
-
 class RESTfulAgentText(RESTfulAgentOutput, type=RESTfulAgentOutputType.TEXT):
     response: str
-
 
 class RESTfulAgentEnd(RESTfulAgentOutput, type=RESTfulAgentOutputType.END):
     pass

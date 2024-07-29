@@ -180,7 +180,20 @@ class ChatGPTAgent(RespondAgent[ChatGPTAgentConfig]):
         else:
             chat_parameters = self.get_chat_parameters()
         chat_parameters["stream"] = True
-        stream = await self.openai_async_client.chat.completions.create(**chat_parameters)
+
+        try:
+            stream = await self.openai_async_client.chat.completions.create(**chat_parameters)
+        except openai.BadRequestError as e:
+            if e.status_code == 400:
+                self.logger.warning("OpenAI returned error code 400 on generate response. Continuing conversation with an empty response...")
+                yield BaseMessage(text="")
+                return
+            else:
+                self.logger.exception("An unexpected error occured: ")
+                raise
+        except Exception:
+            self.logger.exception("An unexpected error occured: ")
+            raise
 
         async for message in collate_response_async(
             openai_get_tokens(stream), get_functions=True

@@ -287,7 +287,6 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
         self.synthesizer.synthesis_word_boundary.connect(
             lambda event: self.word_boundary_cb(event, word_boundary_event_pool)
         )
-        # print("Viseme event received: audio offset: {}ms, viseme id: {}.".format(evt.audio_offset / 10000, evt.viseme_id))
         self.synthesizer.viseme_received.connect(lambda evt: viseme_events.append(evt))
         ssml = (
             message.ssml

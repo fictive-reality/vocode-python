@@ -45,18 +45,18 @@ AZURE_TICK_PER_SECOND = 10000000
 def viseme_events_to_str(events: list[SpeechSynthesisVisemeEventArgs]):
     out = ""
     for evt in events:
-        out += f"{ticks2s(evt.audio_offset):.2f}: {AZURE_PHONETIC_SYMBOLS[evt.viseme_id]}\n"
+        out += f"{ticks_to_seconds(evt.audio_offset):.2f}: {AZURE_PHONETIC_SYMBOLS[evt.viseme_id]}\n"
     return out
 
 
 def word_events_to_str(events: list[SpeechSynthesisWordBoundaryEventArgs]):
     out = ""
     for evt in events:
-        out += f"{ticks2s(evt.audio_offset):.2f}: '{evt.text}'\n"
+        out += f"{ticks_to_seconds(evt.audio_offset):.2f}: '{evt.text}'\n"
     return out
 
 
-def ticks2s(ticks: int):
+def ticks_to_seconds(ticks: int):
     return ticks / AZURE_TICK_PER_SECOND
 
 
@@ -67,7 +67,7 @@ def get_events_for(
     result_id: str = None
 ):
     # NOTE we sometimes get 0 as audio_offset, so we need to filter those out
-    out = [event for event in events if event.audio_offset and from_s <= ticks2s(event.audio_offset) < to_s]
+    out = [event for event in events if event.audio_offset and from_s <= ticks_to_seconds(event.audio_offset) < to_s]
     # NOTE, for debug, we can provide a result_id and ensure we get only events for that result_id
     # but this is not on by default
     if result_id:
@@ -89,7 +89,7 @@ def get_lipsync_events(
     result_id: str = None):
     out = [
         {
-            "audio_offset": ticks2s(evt.audio_offset) - from_s,
+            "audio_offset": ticks_to_seconds(evt.audio_offset) - from_s,
             "viseme_id": evt.viseme_id,
         }
         for evt in get_events_for(viseme_events, from_s, to_s, result_id)
@@ -271,9 +271,9 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
         synthesizer.synthesis_word_boundary.connect(lambda x: word_events.append(x))
 
         result: SpeechSynthesisResult = synthesizer.start_speaking_ssml_async(ssml).get()
-        text = re.sub(r"<.+?>", "", ssml)[0:20]
+        truncated_text = re.sub(r"<.+?>", "", ssml)[0:20]
         self.logger.debug(
-            f"Started synthesis for message '{text}…', using synth {id(synthesizer)}, Azure result_id: {result.result_id}"
+            f"Started synthesis for message '{truncated_text}…', using synth {id(synthesizer)}, Azure result_id: {result.result_id}"
         )
         chunk_transform = (lambda chunk: encode_as_wav(chunk, self.synthesizer_config)) if self.as_wav else (lambda chunk: chunk)
 

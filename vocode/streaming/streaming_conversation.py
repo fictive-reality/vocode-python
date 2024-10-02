@@ -748,7 +748,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
         # Always signal closing to the chunk generator
         await synthesis_result.chunk_generator.aclose()
         if synthesis_result.get_lipsync_events:
-            # self.logger.debug(self.synthesizer.print_all_events())
+            # Debug log to show all visemes from start to some max (1000s). Remove when not needed.
             lipsync_events = synthesis_result.get_lipsync_events(0, 1000)
             self.logger.debug(message_sent + ":\n" + print_visemes(lipsync_events, AZURE_TO_OVR))
         if self.transcriber.get_transcriber_config().mute_during_speech:

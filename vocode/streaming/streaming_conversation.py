@@ -27,7 +27,7 @@ from vocode.streaming.models.transcript import (
 from vocode.streaming.models.message import BaseMessage
 from vocode.streaming.models.transcriber import EndpointingConfig, TranscriberConfig
 from vocode.streaming.output_device.base_output_device import BaseOutputDevice
-from vocode.streaming.utils import save_as_wav, trim_audio, print_visemes, AZURE_TO_OVR
+from vocode.streaming.utils import save_as_wav, trim_audio, print_visemes
 from vocode.streaming.utils.conversation_logger_adapter import wrap_logger
 from vocode.streaming.utils.events_manager import EventsManager
 from vocode.streaming.utils.goodbye_model import GoodbyeModel
@@ -750,7 +750,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
         if synthesis_result.get_lipsync_events:
             # Debug log to show all visemes from start to some max (1000s). Remove when not needed.
             lipsync_events = synthesis_result.get_lipsync_events(0, 1000)
-            self.logger.debug(message_sent + ":\n" + print_visemes(lipsync_events, AZURE_TO_OVR))
+            self.logger.debug(message_sent + ":\n" + print_visemes(lipsync_events))
         if self.transcriber.get_transcriber_config().mute_during_speech:
             self.logger.debug("Unmuting transcriber")
             self.transcriber.unmute()

@@ -25,10 +25,6 @@ from vocode.streaming.synthesizer.base_synthesizer import (
     SynthesisResult,
     encode_as_wav,
 )
-from vocode.streaming.utils import (
-    AZURE_PHONETIC_SYMBOLS,
-)
-
 
 NAMESPACES = {
     "mstts": "https://www.w3.org/2001/mstts",
@@ -40,13 +36,6 @@ ET.register_namespace("mstts", NAMESPACES["mstts"])
 
 SLEEP_TIME = 0.1  # how long we sleep between checking for new data in the stream
 AZURE_TICK_PER_SECOND = 10000000
-
-
-def viseme_events_to_str(events: list[SpeechSynthesisVisemeEventArgs]):
-    out = ""
-    for evt in events:
-        out += f"{ticks_to_seconds(evt.audio_offset):.2f}: {AZURE_PHONETIC_SYMBOLS[evt.viseme_id]}\n"
-    return out
 
 
 def word_events_to_str(events: list[SpeechSynthesisWordBoundaryEventArgs]):
@@ -90,7 +79,7 @@ def get_lipsync_events(
     out = [
         {
             "audio_offset": ticks_to_seconds(evt.audio_offset) - from_s,
-            "viseme_id": evt.viseme_id,
+            "viseme_id": f"azure_{evt.viseme_id}",
         }
         for evt in get_events_for(viseme_events, from_s, to_s, result_id)
     ]

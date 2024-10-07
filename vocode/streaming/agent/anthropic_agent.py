@@ -1,6 +1,5 @@
-import json
+import asyncio
 import logging
-import time
 from typing import AsyncGenerator, Optional, Tuple
 
 import anthropic
@@ -82,14 +81,14 @@ class ChatAnthropicAgent(RespondAgent[ChatAnthropicAgentConfig]):
                     yield BaseMessage(text=message)
                 break
             except anthropic.APIStatusError as e:
-                message_json = json.loads(
-                    e.message.replace("'", '"').replace("None", "null")
-                )
-                if message_json["error"]["type"] == "overloaded_error":
+                # We look for the message as we are receiving a 200 OK in an
+                # overload situation that should return a 529 as it is stipulated
+                # in the docs here: https://docs.anthropic.com/en/api/errors
+                if "overloaded_error" in e.message:
                     self.logger.warning(
                         f"Anthropic API is overloaded. Retrying in {delay} seconds..."
                     )
-                    time.sleep(delay)
+                    await asyncio.sleep(delay)
                     delay *= 2
                     if delay > 60:
                         delay = 60

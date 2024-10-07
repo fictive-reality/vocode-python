@@ -47,7 +47,8 @@ class AsyncGeneratorWrapper(AsyncGenerator[SynthesisResult.ChunkResult, None]):
             raise
     
     async def aclose(self):
-        self.when_finished(self.all_bytes)
+        if self.all_bytes:
+            self.when_finished(self.all_bytes)
         self.all_bytes = None
         await self.generator.aclose()
 

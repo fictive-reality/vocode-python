@@ -1,4 +1,6 @@
+import json
 import logging
+import time
 from typing import AsyncGenerator, Optional, Tuple
 
 import anthropic
@@ -50,6 +52,8 @@ class ChatAnthropicAgent(RespondAgent[ChatAnthropicAgentConfig]):
         human_input: str,
         conversation_id: str,
         is_interrupt: bool = False,
+        retry_attempts: int = 5,
+        initial_delay: int = 1,
     ) -> AsyncGenerator[BaseMessage, None]:
         if is_interrupt and self.agent_config.cut_off_response:
             cut_off_response = self.get_cut_off_response()
@@ -61,18 +65,36 @@ class ChatAnthropicAgent(RespondAgent[ChatAnthropicAgentConfig]):
             self.transcript
         )
 
-        stream = await self.anthropic_async_client.messages.create(
-            max_tokens=1024,
-            messages=messages_formatted,
-            system=self.agent_config.prompt_preamble,
-            model="claude-3-haiku-20240307",
-            stream=True,
-        )
+        delay = initial_delay
+        for i in range(retry_attempts):
+            try:
+                stream = await self.anthropic_async_client.messages.create(
+                    max_tokens=1024,
+                    messages=messages_formatted,
+                    system=self.agent_config.prompt_preamble,
+                    model="claude-3-haiku-20240307",
+                    stream=True,
+                )
 
-        async for message in collate_response_async(
-            anthropic_get_tokens(stream), get_functions=True
-        ):
-            yield BaseMessage(text=message)
+                async for message in collate_response_async(
+                    anthropic_get_tokens(stream), get_functions=True
+                ):
+                    yield BaseMessage(text=message)
+                break
+            except anthropic.APIStatusError as e:
+                message_json = json.loads(
+                    e.message.replace("'", '"').replace("None", "null")
+                )
+                if message_json["error"]["type"] == "overloaded_error":
+                    self.logger.warning(
+                        f"Anthropic API is overloaded. Retrying in {delay} seconds..."
+                    )
+                    time.sleep(delay)
+                    delay *= 2
+                    if delay > 60:
+                        delay = 60
+                else:
+                    raise
 
     def update_last_bot_message_on_cut_off(self, message: str):
         for memory_message in self.memory.chat_memory.messages[::-1]:

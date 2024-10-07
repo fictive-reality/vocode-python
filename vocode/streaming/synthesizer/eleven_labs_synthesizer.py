@@ -29,6 +29,15 @@ ADAM_VOICE_ID = "pNInz6obpgDQGcFmaJgB"
 ELEVEN_LABS_BASE_URL = "https://api.elevenlabs.io/v1/"
 lipsync_processor = OVRLipsyncProcessor(24000) # TODO currently hardcoded
 
+def get_lipsync_events(from_s: int, to_s: int, lipsync_events: list) -> list:
+    events = [
+    {
+        "audio_offset": event['audio_offset'] - from_s,
+        "viseme_id": event["viseme_id"],
+    }
+     for event in lipsync_events if event["audio_offset"] and from_s <= event["audio_offset"] < to_s]
+    return events
+
 class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
     def __init__(
         self,
@@ -95,9 +104,10 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
                 wav_chunk, is_last = await miniaudio_worker.output_queue.get()
                 if lipsync_events is not None and self.lipsync_processor:
                     if not lipsync_processor.process:
-                        lipsync_processor.start()
-                    lipsync_events.extend(await self.lipsync_processor.detect_lipsync(wav_chunk, audio_offset))
-                audio_offset += len(wav_chunk) / self.bytes_per_second
+                        await lipsync_processor.start()
+                    lipsync_in_chunk = await self.lipsync_processor.detect_lipsync(wav_chunk, audio_offset)
+                    lipsync_events.extend(lipsync_in_chunk)
+                    audio_offset += len(wav_chunk) / self.bytes_per_second
 
                 if self.synthesizer_config.should_encode_as_wav:
                     wav_chunk = encode_as_wav(wav_chunk, self.synthesizer_config)
@@ -188,7 +198,7 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
                 lambda seconds: self.get_message_cutoff_from_voice_speed(
                     message, seconds, self.words_per_minute
                 ),
-                lambda from_s, to_s: [event for event in lipsync_events if event["audio_offset"] and from_s <= event["audio_offset"] < to_s],
+                lambda from_s, to_s: get_lipsync_events(from_s, to_s, lipsync_events),
             )
         else:
             audio_data = await response.read()

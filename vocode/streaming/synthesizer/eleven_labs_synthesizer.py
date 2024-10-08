@@ -20,11 +20,23 @@ from vocode.streaming.agent.bot_sentiment_analyser import BotSentiment
 from vocode.streaming.models.message import BaseMessage
 from vocode.streaming.utils.mp3_helper import decode_mp3
 from vocode.streaming.synthesizer.miniaudio_worker import MiniaudioWorker
+from vocode.streaming.synthesizer.ovrlipsync.ovrlipsync import OVRLipsyncProcessor
+from vocode.streaming.utils import get_chunk_size_per_second
+
 
 
 ADAM_VOICE_ID = "pNInz6obpgDQGcFmaJgB"
 ELEVEN_LABS_BASE_URL = "https://api.elevenlabs.io/v1/"
+lipsync_processor = OVRLipsyncProcessor(24000) # TODO currently hardcoded
 
+def get_lipsync_events(from_s: int, to_s: int, lipsync_events: list) -> list:
+    events = [
+    {
+        "audio_offset": event['audio_offset'] - from_s,
+        "viseme_id": event["viseme_id"],
+    }
+     for event in lipsync_events if event["audio_offset"] and from_s <= event["audio_offset"] < to_s]
+    return events
 
 class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
     def __init__(
@@ -48,12 +60,19 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
         self.words_per_minute = 150
         self.experimental_streaming = synthesizer_config.experimental_streaming
         self.logger = logger
+        self.bytes_per_second = get_chunk_size_per_second(synthesizer_config.audio_encoding, synthesizer_config.sampling_rate)
+
+        if lipsync_processor.sample_rate == synthesizer_config.sampling_rate:
+            self.lipsync_processor = lipsync_processor
+        else:  
+            self.logger.warning(f"OVRLipsyncProcessor not started because sample rate {lipsync_processor.sample_rate} does not match synthesizer sample rate {synthesizer_config.sampling_rate}")
 
     async def experimental_streaming_output_generator(
         self,
         response: aiohttp.ClientResponse,
         chunk_size: int,
         create_speech_span: Optional[Span],
+        lipsync_events: Optional[list] = None,
     ) -> AsyncGenerator[SynthesisResult.ChunkResult, None]:
         miniaudio_worker_input_queue: asyncio.Queue[
             Union[bytes, None]
@@ -78,11 +97,18 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
 
         try:
             asyncio.create_task(send_chunks())
-
+            audio_offset = 0.0
             # Await the output queue of the MiniaudioWorker and yield the wav chunks in another loop
             while True:
                 # Get the wav chunk and the flag from the output queue of the MiniaudioWorker
                 wav_chunk, is_last = await miniaudio_worker.output_queue.get()
+                if lipsync_events is not None and self.lipsync_processor:
+                    if not lipsync_processor.process:
+                        await lipsync_processor.start()
+                    lipsync_in_chunk = await self.lipsync_processor.detect_lipsync(wav_chunk, audio_offset)
+                    lipsync_events.extend(lipsync_in_chunk)
+                    audio_offset += len(wav_chunk) / self.bytes_per_second
+
                 if self.synthesizer_config.should_encode_as_wav:
                     wav_chunk = encode_as_wav(wav_chunk, self.synthesizer_config)
 
@@ -164,13 +190,15 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
             raise Exception(f"Failed to retrieve response from ElevenLabs after {attempts} tries for '{message.text}'.")
 
         if self.experimental_streaming:
+            lipsync_events = []
             return SynthesisResult(
                 self.experimental_streaming_output_generator(
-                    response, chunk_size, create_speech_span
+                    response, chunk_size, create_speech_span, lipsync_events
                 ),  # should be wav
                 lambda seconds: self.get_message_cutoff_from_voice_speed(
                     message, seconds, self.words_per_minute
                 ),
+                lambda from_s, to_s: get_lipsync_events(from_s, to_s, lipsync_events),
             )
         else:
             audio_data = await response.read()

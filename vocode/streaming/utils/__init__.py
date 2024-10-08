@@ -12,54 +12,46 @@ from ..models.audio_encoding import AudioEncoding
 logger = logging.getLogger(__name__)
 custom_alphabet = ascii_letters + digits + ".-_"
 
-AZURE_PHONETIC_SYMBOLS = {
-    0: "silence",
-    1: "æ, ə, ʌ",
-    2: "ɑ",
-    3: "ɔ",
-    4: "ɛ, ʊ",
-    5: "ɝ",
-    6: "j, i, ɪ",
-    7: "w, u",
-    8: "o",
-    9: "aʊ",
-    10: "ɔɪ",
-    11: "aɪ",
-    12: "h",
-    13: "ɹ",
-    14: "l",
-    15: "s, z",
-    16: "ʃ, tʃ, dʒ, ʒ",
-    17: "ð",
-    18: "f, v",
-    19: "d, t, n, θ",
-    20: "k, g, ŋ",
-    21: "p, b, m",
-}
-
-AZURE_TO_OVR = {
-  0: "viseme_sil",
-  1: "viseme_aa",
-  2: "viseme_aa",
-  3: "viseme_aa",
-  4: "viseme_U",
-  5: "viseme_nn",
-  6: "viseme_I",
-  7: "viseme_O",
-  8: "viseme_O",
-  9: "viseme_aa",
-  10: "viseme_O",
-  11: "viseme_aa",
-  12: "viseme_U",
-  13: "viseme_RR",
-  14: "viseme_nn",
-  15: "viseme_SS",
-  16: "viseme_CH",
-  17: "viseme_TH",
-  18: "viseme_FF",
-  19: "viseme_DD",
-  20: "viseme_kk",
-  21: "viseme_PP",
+ALL_VISEME_LABELS = {
+    # Azure
+    "azure_0": "silence",
+    "azure_1": "æ, ə, ʌ",
+    "azure_2": "ɑ",
+    "azure_3": "ɔ",
+    "azure_4": "ɛ, ʊ",
+    "azure_5": "ɝ",
+    "azure_6": "j, i, ɪ",
+    "azure_7": "w, u",
+    "azure_8": "o",
+    "azure_9": "aʊ",
+    "azure_10": "ɔɪ",
+    "azure_11": "aɪ",
+    "azure_12": "h",
+    "azure_13": "ɹ",
+    "azure_14": "l",
+    "azure_15": "s, z",
+    "azure_16": "ʃ, tʃ, dʒ, ʒ",
+    "azure_17": "ð",
+    "azure_18": "f, v",
+    "azure_19": "d, t, n, θ",
+    "azure_20": "k, g, ŋ",
+    "azure_21": "p, b, m",
+    # OVR
+    "ovr_sil": "sil",
+    "ovr_PP": "PP",
+    "ovr_FF": "FF",
+    "ovr_TH": "TH",
+    "ovr_DD": "DD",
+    "ovr_kk": "kk",
+    "ovr_CH": "CH",
+    "ovr_SS": "SS",
+    "ovr_nn": "nn",
+    "ovr_RR": "RR",
+    "ovr_aa": "aa",
+    "ovr_E": "E",
+    "ovr_I": "I",
+    "ovr_O": "O",
+    "ovr_U": "U",
 }
 
 def create_loop_in_thread(loop: asyncio.AbstractEventLoop, long_running_task=None):
@@ -120,10 +112,11 @@ def create_conversation_id() -> str:
 def remove_non_letters_digits(text):
     return ''.join(i for i in text if i in custom_alphabet)
 
-def print_visemes(lipsync_events, lookup_table):
+def print_visemes(lipsync_events):
     out = ""
     for event in lipsync_events:
-        out += f'{event["audio_offset"]}\t{event["audio_offset"]}\t{lookup_table[event["viseme_id"]]}\n'
+        label = ALL_VISEME_LABELS.get(event["viseme_id"], event["viseme_id"])
+        out += f'{event["audio_offset"]}\t{label}\n'
     return out
 
 def save_as_wav(path, audio_data: bytes, sampling_rate: int):

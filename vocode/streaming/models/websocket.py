@@ -28,7 +28,7 @@ class WebSocketMessage(TypedModel, type=WebSocketMessageType.BASE):
 
 class LipsyncEvent(TypedModel):
     audio_offset: float
-    viseme_id: int
+    viseme_id: str
 
 class AudioMessage(WebSocketMessage, type=WebSocketMessageType.AUDIO):
     data: str

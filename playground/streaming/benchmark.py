@@ -498,7 +498,7 @@ async def run_transcribers():
                     break
             if not args.transcriber_use_mic:
                 pbar.update(pbar.total - pbar.n)
-            transcriber.terminate()
+            await transcriber.terminate()
 
 
 def create_graphs(final_results):

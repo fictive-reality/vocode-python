@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import base64
 from typing import Optional
 
@@ -13,6 +14,7 @@ from vocode.streaming.telephony.constants import (
     DEFAULT_SAMPLING_RATE,
 )
 
+logger = logging.getLogger(__name__)
 
 class TwilioOutputDevice(BaseOutputDevice):
     def __init__(
@@ -50,5 +52,9 @@ class TwilioOutputDevice(BaseOutputDevice):
         }
         self.queue.put_nowait(json.dumps(mark_message))
 
-    def terminate(self):
+    async def terminate(self):
         self.process_task.cancel()
+        try:
+            await self.process_task
+        except asyncio.CancelledError:
+            logger.debug(f"Task {str(self.process_task)} successfully cancelled.")

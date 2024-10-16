@@ -36,9 +36,14 @@ class AsyncWorker(Generic[WorkerInputType]):
     async def _run_loop(self):
         raise NotImplementedError
 
-    def terminate(self):
+    async def terminate(self):
         if self.worker_task:
-            return self.worker_task.cancel()
+            self.worker_task.cancel()
+            try:
+                await self.worker_task
+            except asyncio.CancelledError:
+                logger.debug(f"Task {str(self.worker_task)} successfully cancelled.")
+                return True
 
         return False
 
@@ -82,8 +87,8 @@ class ThreadAsyncWorker(AsyncWorker[WorkerInputType]):
     def _run_loop(self):
         raise NotImplementedError
 
-    def terminate(self):
-        return super().terminate()
+    async def terminate(self):
+        return await super().terminate()
 
 
 class AsyncQueueWorker(AsyncWorker):

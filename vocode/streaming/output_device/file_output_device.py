@@ -21,8 +21,8 @@ class FileWriterWorker(ThreadAsyncWorker):
             except asyncio.CancelledError:
                 return
 
-    def terminate(self):
-        super().terminate()
+    async def terminate(self):
+        await super().terminate()
         self.wav.close()
 
 
@@ -56,5 +56,5 @@ class FileOutputDevice(BaseOutputDevice):
             block[:size] = chunk_arr[i : i + size]
             self.queue.put_nowait(block)
 
-    def terminate(self):
-        self.thread_worker.terminate()
+    async def terminate(self):
+        await self.thread_worker.terminate()

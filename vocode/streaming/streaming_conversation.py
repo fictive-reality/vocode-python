@@ -806,30 +806,30 @@ class StreamingConversation(Generic[OutputDeviceType]):
             # `agent.terminate()` is not async.
             self.logger.debug("Terminating vector db")
             await self.agent.vector_db.tear_down()
-        self.agent.terminate()
+        await self.agent.terminate()
 
         self.logger.debug("Terminating output device")
         self.output_device.terminate()
 
         self.logger.debug("Terminating speech transcriber")
-        self.transcriber.terminate()
+        await self.transcriber.terminate()
 
         self.logger.debug("Terminating transcriptions worker")
-        self.transcriptions_worker.terminate()
+        await self.transcriptions_worker.terminate()
 
         self.logger.debug("Terminating final transcriptions worker")
-        self.agent_responses_worker.terminate()
+        await self.agent_responses_worker.terminate()
 
         self.logger.debug("Terminating synthesis results worker")
-        self.synthesis_results_worker.terminate()
+        await self.synthesis_results_worker.terminate()
 
         if self.filler_audio_worker is not None:
             self.logger.debug("Terminating filler audio worker")
-            self.filler_audio_worker.terminate()
+            await self.filler_audio_worker.terminate()
 
         if self.actions_worker is not None:
             self.logger.debug("Terminating actions worker")
-            self.actions_worker.terminate()
+            await self.actions_worker.terminate()
 
         self.logger.debug("Successfully terminated")
 

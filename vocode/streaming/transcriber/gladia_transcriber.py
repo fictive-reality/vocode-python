@@ -63,9 +63,9 @@ class GladiaTranscriber(BaseAsyncTranscriber[GladiaTranscriberConfig]):
             self.input_queue.put_nowait(self.buffer)
             self.buffer = bytearray()
 
-    def terminate(self):
+    async def terminate(self):
         self._ended = True
-        super().terminate()
+        await super().terminate()
 
     async def process(self):
         async with websockets.connect(GLADIA_URL) as ws:

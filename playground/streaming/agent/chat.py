@@ -136,7 +136,7 @@ async def run_agent(agent: BaseAgent):
 
     await asyncio.gather(receiver(), sender())
     if actions_worker is not None:
-        actions_worker.terminate()
+        await actions_worker.terminate()
 
 
 async def agent_main():
@@ -167,7 +167,7 @@ async def agent_main():
     try:
         await run_agent(agent)
     except KeyboardInterrupt:
-        agent.terminate()
+        await agent.terminate()
 
 
 if __name__ == "__main__":

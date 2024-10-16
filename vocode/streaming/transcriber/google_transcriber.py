@@ -72,9 +72,9 @@ class GoogleTranscriber(BaseThreadAsyncTranscriber[GoogleTranscriberConfig]):
         )
         self.process_responses_loop(responses)
 
-    def terminate(self):
+    async def terminate(self):
         self._ended = True
-        super().terminate()
+        await super().terminate()
 
     def process_responses_loop(self, responses):
         for response in responses:

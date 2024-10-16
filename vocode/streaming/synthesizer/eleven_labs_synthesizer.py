@@ -88,6 +88,8 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
         )
         miniaudio_worker.start()
         stream_reader = response.content
+        start_time = create_speech_span.start_time if create_speech_span is not None else None
+        first_chunk_span = tracer.start_span(name="eleven_labs.first_chunk", start_time=start_time)
 
         # Create a task to send the mp3 chunks to the MiniaudioWorker's input queue in a separate loop
         async def send_chunks():
@@ -103,14 +105,18 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
                 # Get the wav chunk and the flag from the output queue of the MiniaudioWorker
                 wav_chunk, is_last = await miniaudio_worker.output_queue.get()
                 if lipsync_events is not None and self.lipsync_processor:
-                    if not lipsync_processor.process:
-                        await lipsync_processor.start()
-                    lipsync_in_chunk = await self.lipsync_processor.detect_lipsync(wav_chunk, audio_offset)
-                    lipsync_events.extend(lipsync_in_chunk)
-                    audio_offset += len(wav_chunk) / self.bytes_per_second
+                    with tracer.start_span(name="ovrlipsync.detect_lipsync") as span:
+                        if not lipsync_processor.process:
+                            await lipsync_processor.start()
+                        lipsync_in_chunk = await self.lipsync_processor.detect_lipsync(wav_chunk, audio_offset)
+                        lipsync_events.extend(lipsync_in_chunk)
+                        audio_offset += len(wav_chunk) / self.bytes_per_second
 
                 if self.synthesizer_config.should_encode_as_wav:
                     wav_chunk = encode_as_wav(wav_chunk, self.synthesizer_config)
+                if first_chunk_span:
+                    first_chunk_span.end()
+                    first_chunk_span = None
 
                 yield SynthesisResult.ChunkResult(wav_chunk, is_last)
                 # If this is the last chunk, break the loop
@@ -120,6 +126,8 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
         except asyncio.CancelledError:
             pass
         finally:
+            if first_chunk_span:
+                first_chunk_span.end()
             miniaudio_worker.terminate()
 
     async def create_speech(

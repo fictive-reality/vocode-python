@@ -9,7 +9,7 @@ from vocode.streaming.output_device.base_output_device import BaseOutputDevice
 from vocode.streaming.models.websocket import AudioMessage
 from vocode.streaming.models.websocket import TranscriptMessage
 from vocode.streaming.models.transcript import TranscriptEvent
-
+from opentelemetry.trace import Span
 
 
 class WebsocketOutputDevice(BaseOutputDevice):
@@ -19,7 +19,7 @@ class WebsocketOutputDevice(BaseOutputDevice):
         super().__init__(sampling_rate, audio_encoding)
         self.ws = ws
         self.active = False
-        self.queue: asyncio.Queue[str] = asyncio.Queue()
+        self.queue: asyncio.Queue[tuple[str, Span]] = asyncio.Queue()
 
     def start(self):
         self.active = True
@@ -30,21 +30,23 @@ class WebsocketOutputDevice(BaseOutputDevice):
 
     async def process(self):
         while self.active:
-            message = await self.queue.get()
+            message, span = await self.queue.get()
             if self.active and self.ws.client_state != WebSocketState.DISCONNECTED:
                 await self.ws.send_text(message)
+                if span:
+                    span.end()
 
-    def consume_nonblocking(self, chunk: bytes, lipsync_events: Optional[list] = None):
+    def consume_nonblocking(self, chunk: bytes, lipsync_events: Optional[list] = None, span: Optional[Span] = None):
         if self.active:
             audio_message = AudioMessage.from_bytes(chunk)
             if lipsync_events:
                 audio_message.lipsync_events = lipsync_events
-            self.queue.put_nowait(audio_message.json())
+            self.queue.put_nowait((audio_message.json(), span))
 
     def consume_transcript(self, event: TranscriptEvent):
         if self.active:
             transcript_message = TranscriptMessage.from_event(event)
-            self.queue.put_nowait(transcript_message.json())
+            self.queue.put_nowait((transcript_message.json(), None))
 
     def terminate(self):
         self.process_task.cancel()

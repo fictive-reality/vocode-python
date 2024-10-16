@@ -10,6 +10,7 @@ import time
 import typing
 import os
 import re
+from opentelemetry.trace import Span
 
 from vocode.streaming.action.worker import ActionsWorker
 
@@ -55,6 +56,7 @@ from vocode.streaming.synthesizer.base_synthesizer import (
     BaseSynthesizer,
     SynthesisResult,
     FillerAudio,
+    tracer
 )
 from vocode.streaming.utils import create_conversation_id, get_chunk_size_per_second
 from vocode.streaming.transcriber.base_transcriber import (
@@ -125,6 +127,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
                 self.conversation.logger.info("Ignoring empty transcription")
                 return
             if transcription.is_final:
+                self.conversation.ttr_span = tracer.start_span(name="ttr")
                 self.conversation.logger.debug(
                     "Got transcription: {}, confidence: {}".format(
                         transcription.message, transcription.confidence
@@ -529,6 +532,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
         # tracing
         self.start_time: Optional[float] = None
         self.end_time: Optional[float] = None
+        self.ttr_span: Optional[Span] = None
 
     def create_state_manager(self) -> ConversationStateManager:
         return ConversationStateManager(conversation=self)
@@ -700,6 +704,10 @@ class StreamingConversation(Generic[OutputDeviceType]):
         chunk_idx = 0
         duration = 0
         async for chunk_result in synthesis_result.chunk_generator:
+            span_to_end = None
+            if chunk_idx == 0 and self.ttr_span:
+                span_to_end = self.ttr_span
+                self.ttr_span = None
             start_time = time.time()
             speech_length_seconds = seconds_per_chunk * (
                 (len(chunk_result.chunk) - chunks_header_length) / chunk_size
@@ -723,7 +731,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
             lipsync_events = []
             if synthesis_result.get_lipsync_events:
                 lipsync_events = synthesis_result.get_lipsync_events(duration, duration + seconds_per_chunk)
-            self.output_device.consume_nonblocking(chunk_result.chunk, lipsync_events)
+            self.output_device.consume_nonblocking(chunk_result.chunk, lipsync_events, span_to_end)
 
             end_time = time.time()
             await asyncio.sleep(

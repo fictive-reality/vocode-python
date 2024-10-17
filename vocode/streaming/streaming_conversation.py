@@ -532,6 +532,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
         # tracing
         self.start_time: Optional[float] = None
         self.end_time: Optional[float] = None
+        # Time-to-respond (first chunk) span
         self.ttr_span: Optional[Span] = None
 
     def create_state_manager(self) -> ConversationStateManager:

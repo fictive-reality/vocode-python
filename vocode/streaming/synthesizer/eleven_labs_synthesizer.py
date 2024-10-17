@@ -73,7 +73,7 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
         chunk_size: int,
         create_speech_span: Optional[Span],
         first_chunk_span: Optional[Span],
-        lipsync_events: Optional[list] = None,
+        lipsync_events: Optional[list],
     ) -> AsyncGenerator[SynthesisResult.ChunkResult, None]:
         miniaudio_worker_input_queue: asyncio.Queue[
             Union[bytes, None]

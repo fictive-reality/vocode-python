@@ -86,11 +86,11 @@ class DeepgramTranscriber(BaseAsyncTranscriber[DeepgramTranscriberConfig]):
             )
         super().send_audio(chunk)
 
-    def terminate(self):
+    async def terminate(self):
         terminate_msg = json.dumps({"type": "CloseStream"})
         self.input_queue.put_nowait(terminate_msg)
         self._ended = True
-        super().terminate()
+        await super().terminate()
 
     def get_deepgram_url(self):
         if self.transcriber_config.audio_encoding == AudioEncoding.LINEAR16:

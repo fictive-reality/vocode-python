@@ -1,6 +1,7 @@
 import asyncio
 from typing import Optional
 import wave
+import logging
 
 from fastapi import WebSocket
 from vocode.streaming.models.audio_encoding import AudioEncoding
@@ -12,6 +13,7 @@ from vocode.streaming.telephony.constants import (
     VONAGE_SAMPLING_RATE,
 )
 
+logger = logging.getLogger(__name__)
 
 class VonageOutputDevice(BaseOutputDevice):
     def __init__(
@@ -47,5 +49,9 @@ class VonageOutputDevice(BaseOutputDevice):
     def maybe_send_mark_nonblocking(self, message_sent):
         pass
 
-    def terminate(self):
+    async def terminate(self):
         self.process_task.cancel()
+        try:
+            await self.process_task
+        except asyncio.CancelledError:
+            logger.debug(f"Task {str(self.process_task)} successfully cancelled.")

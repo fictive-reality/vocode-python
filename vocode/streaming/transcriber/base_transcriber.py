@@ -73,8 +73,8 @@ class BaseAsyncTranscriber(AbstractTranscriber[TranscriberConfigType], AsyncWork
         else:
             self.consume_nonblocking(self.create_silent_chunk(len(chunk)))
 
-    def terminate(self):
-        AsyncWorker.terminate(self)
+    async def terminate(self):
+        await AsyncWorker.terminate(self)
 
 
 class BaseThreadAsyncTranscriber(
@@ -98,8 +98,8 @@ class BaseThreadAsyncTranscriber(
         else:
             self.consume_nonblocking(self.create_silent_chunk(len(chunk)))
 
-    def terminate(self):
-        ThreadAsyncWorker.terminate(self)
+    async def terminate(self):
+        await ThreadAsyncWorker.terminate(self)
 
 
 BaseTranscriber = Union[

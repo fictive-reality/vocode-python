@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Optional
 
 import asyncio
+import logging
 from fastapi import WebSocket
 from fastapi.websockets import WebSocketState
 from vocode.streaming.models.audio_encoding import AudioEncoding
@@ -11,6 +12,8 @@ from vocode.streaming.models.websocket import TranscriptMessage
 from vocode.streaming.models.transcript import TranscriptEvent
 from opentelemetry.trace import Span
 
+
+logger = logging.getLogger(__name__)
 
 class WebsocketOutputDevice(BaseOutputDevice):
     def __init__(
@@ -29,12 +32,18 @@ class WebsocketOutputDevice(BaseOutputDevice):
         self.active = False
 
     async def process(self):
-        while self.active:
-            message, span = await self.queue.get()
-            if self.active and self.ws.client_state != WebSocketState.DISCONNECTED:
-                await self.ws.send_text(message)
-                if span:
-                    span.end()
+        try:
+            while self.active:
+                message, span = await self.queue.get()
+                if self.active and self.ws.client_state != WebSocketState.DISCONNECTED:
+                    await self.ws.send_text(message)
+                    if span:
+                        span.end()
+        except asyncio.CancelledError:
+            logger.debug("WebsocketOutputDevice process task was cancelled while waiting on the queue.")
+            raise
+        except Exception as e:
+            raise e
 
     def consume_nonblocking(self, chunk: bytes, lipsync_events: Optional[list] = None, span: Optional[Span] = None):
         if self.active:
@@ -48,5 +57,12 @@ class WebsocketOutputDevice(BaseOutputDevice):
             transcript_message = TranscriptMessage.from_event(event)
             self.queue.put_nowait((transcript_message.json(), None))
 
-    def terminate(self):
+    async def terminate(self):
+        self.mark_closed()
         self.process_task.cancel()
+        try:
+            await self.process_task
+        except asyncio.CancelledError:
+            logger.debug(f"Task {str(self.process_task)} successfully cancelled.")
+        except Exception as e:
+            raise e

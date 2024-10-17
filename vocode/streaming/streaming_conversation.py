@@ -779,15 +779,31 @@ class StreamingConversation(Generic[OutputDeviceType]):
         if self.check_for_idle_task:
             self.logger.debug("Terminating check_for_idle Task")
             self.check_for_idle_task.cancel()
+            try:
+                await self.check_for_idle_task
+            except asyncio.CancelledError:
+                self.logger.debug("check_for_idle Task successfully cancelled")
+
         if self.track_bot_sentiment_task:
             self.logger.debug("Terminating track_bot_sentiment Task")
             self.track_bot_sentiment_task.cancel()
+            try:
+                await self.track_bot_sentiment_task
+            except asyncio.CancelledError:
+                self.logger.debug("track_bot_sentiment Task successfully cancelled")
+
         if self.events_manager and self.events_task:
             self.logger.debug("Terminating events Task")
             await self.events_manager.flush()
             self.events_task.cancel()
+            try:
+                await self.events_task
+            except asyncio.CancelledError:
+                self.logger.debug("events Task successfully cancelled")
+
         self.logger.debug("Tearing down synthesizer")
         await self.synthesizer.tear_down()
+
         self.logger.debug("Terminating agent")
         if (
             isinstance(self.agent, ChatGPTAgent)
@@ -798,24 +814,33 @@ class StreamingConversation(Generic[OutputDeviceType]):
             # `agent.terminate()` is not async.
             self.logger.debug("Terminating vector db")
             await self.agent.vector_db.tear_down()
-        self.agent.terminate()
+        await self.agent.terminate()
+
         self.logger.debug("Terminating output device")
         self.output_device.terminate()
+
         self.logger.debug("Terminating speech transcriber")
-        self.transcriber.terminate()
+        await self.transcriber.terminate()
+
         self.logger.debug("Terminating transcriptions worker")
-        self.transcriptions_worker.terminate()
+        await self.transcriptions_worker.terminate()
+
         self.logger.debug("Terminating final transcriptions worker")
-        self.agent_responses_worker.terminate()
+        await self.agent_responses_worker.terminate()
+
         self.logger.debug("Terminating synthesis results worker")
-        self.synthesis_results_worker.terminate()
+        await self.synthesis_results_worker.terminate()
+
         if self.filler_audio_worker is not None:
             self.logger.debug("Terminating filler audio worker")
-            self.filler_audio_worker.terminate()
+            await self.filler_audio_worker.terminate()
+
         if self.actions_worker is not None:
             self.logger.debug("Terminating actions worker")
-            self.actions_worker.terminate()
+            await self.actions_worker.terminate()
+
         self.logger.debug("Successfully terminated")
+
 
     def is_active(self):
         return self.active

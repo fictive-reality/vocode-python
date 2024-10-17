@@ -72,6 +72,7 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
         response: aiohttp.ClientResponse,
         chunk_size: int,
         create_speech_span: Optional[Span],
+        first_chunk_span: Optional[Span],
         lipsync_events: Optional[list] = None,
     ) -> AsyncGenerator[SynthesisResult.ChunkResult, None]:
         miniaudio_worker_input_queue: asyncio.Queue[
@@ -88,8 +89,6 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
         )
         miniaudio_worker.start()
         stream_reader = response.content
-        start_time = create_speech_span.start_time if create_speech_span is not None else None
-        first_chunk_span = tracer.start_span(name="eleven_labs.first_chunk", start_time=start_time)
 
         # Create a task to send the mp3 chunks to the MiniaudioWorker's input queue in a separate loop
         async def send_chunks():
@@ -159,6 +158,7 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
         create_speech_span = tracer.start_span(
             f"synthesizer.{SynthesizerType.ELEVEN_LABS.value.split('_', 1)[-1]}.create_total",
         )
+        first_chunk_span = tracer.start_span(name="eleven_labs_synthesizer.first_chunk")
 
         session = self.aiohttp_session
 
@@ -201,7 +201,7 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
             lipsync_events = []
             return SynthesisResult(
                 self.experimental_streaming_output_generator(
-                    response, chunk_size, create_speech_span, lipsync_events
+                    response, chunk_size, create_speech_span, first_chunk_span, lipsync_events
                 ),  # should be wav
                 lambda seconds: self.get_message_cutoff_from_voice_speed(
                     message, seconds, self.words_per_minute

@@ -127,7 +127,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
                 self.conversation.logger.info("Ignoring empty transcription")
                 return
             if transcription.is_final:
-                self.conversation.ttr_span = tracer.start_span(name="ttr")
+                self.conversation.ttr_span = tracer.start_span(name="time_to_first_chunk")
                 self.conversation.logger.debug(
                     "Got transcription: {}, confidence: {}".format(
                         transcription.message, transcription.confidence

@@ -72,7 +72,8 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
         response: aiohttp.ClientResponse,
         chunk_size: int,
         create_speech_span: Optional[Span],
-        lipsync_events: Optional[list] = None,
+        first_chunk_span: Optional[Span],
+        lipsync_events: Optional[list],
     ) -> AsyncGenerator[SynthesisResult.ChunkResult, None]:
         miniaudio_worker_input_queue: asyncio.Queue[
             Union[bytes, None]
@@ -103,14 +104,18 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
                 # Get the wav chunk and the flag from the output queue of the MiniaudioWorker
                 wav_chunk, is_last = await miniaudio_worker.output_queue.get()
                 if lipsync_events is not None and self.lipsync_processor:
-                    if not lipsync_processor.process:
-                        await lipsync_processor.start()
-                    lipsync_in_chunk = await self.lipsync_processor.detect_lipsync(wav_chunk, audio_offset)
-                    lipsync_events.extend(lipsync_in_chunk)
-                    audio_offset += len(wav_chunk) / self.bytes_per_second
+                    with tracer.start_span(name="ovrlipsync.detect_lipsync") as span:
+                        if not lipsync_processor.process:
+                            await lipsync_processor.start()
+                        lipsync_in_chunk = await self.lipsync_processor.detect_lipsync(wav_chunk, audio_offset)
+                        lipsync_events.extend(lipsync_in_chunk)
+                        audio_offset += len(wav_chunk) / self.bytes_per_second
 
                 if self.synthesizer_config.should_encode_as_wav:
                     wav_chunk = encode_as_wav(wav_chunk, self.synthesizer_config)
+                if first_chunk_span:
+                    first_chunk_span.end()
+                    first_chunk_span = None
 
                 yield SynthesisResult.ChunkResult(wav_chunk, is_last)
                 # If this is the last chunk, break the loop
@@ -120,6 +125,8 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
         except asyncio.CancelledError:
             pass
         finally:
+            if first_chunk_span:
+                first_chunk_span.end()
             miniaudio_worker.terminate()
 
     async def create_speech(
@@ -151,6 +158,7 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
         create_speech_span = tracer.start_span(
             f"synthesizer.{SynthesizerType.ELEVEN_LABS.value.split('_', 1)[-1]}.create_total",
         )
+        first_chunk_span = tracer.start_span(name="eleven_labs_synthesizer.first_chunk")
 
         session = self.aiohttp_session
 
@@ -193,7 +201,7 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
             lipsync_events = []
             return SynthesisResult(
                 self.experimental_streaming_output_generator(
-                    response, chunk_size, create_speech_span, lipsync_events
+                    response, chunk_size, create_speech_span, first_chunk_span, lipsync_events
                 ),  # should be wav
                 lambda seconds: self.get_message_cutoff_from_voice_speed(
                     message, seconds, self.words_per_minute

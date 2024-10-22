@@ -24,6 +24,7 @@ from vocode.streaming.synthesizer.base_synthesizer import (
     BaseSynthesizer,
     SynthesisResult,
     encode_as_wav,
+    tracer
 )
 
 NAMESPACES = {
@@ -246,7 +247,7 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
                 self.empty_generator(),
                 lambda _: message.text,
             )
-
+        first_chunk_span = tracer.start_span(name="azure_synthesizer.first_chunk")
         ssml = (
             message.ssml
             if isinstance(message, SSMLMessage)
@@ -268,6 +269,7 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
 
         # NOTE chunk_generator is responsible for disconnecting events and putting back synth once it has finished running
         async def chunk_generator():
+            nonlocal first_chunk_span
             try:
                 stream = AudioDataStream(result)
                 chunk_data = bytes(chunk_size)
@@ -279,6 +281,9 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
 
                     filled_size = stream.read_data(chunk_data)
                     last_chunk = filled_size < chunk_size
+                    if first_chunk_span:
+                        first_chunk_span.end()
+                        first_chunk_span = None
                     yield SynthesisResult.ChunkResult(chunk_transform(chunk_data[:filled_size]), last_chunk)
                     if last_chunk:
                         break
@@ -286,6 +291,8 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
                 self.logger.exception(f"Error when generating chunks for result_id={result.result_id}")
             finally:
                 # Finally should be called if we get an exception or if the generator is closed early using aclose()
+                if first_chunk_span:
+                    first_chunk_span.end()
                 if stream.status != StreamStatus.AllData:
                     self.logger.warning(
                         f"Closing stream for result_id={result.result_id} with status {stream.status} and details {stream.cancellation_details.error_details if stream.cancellation_details else None}"

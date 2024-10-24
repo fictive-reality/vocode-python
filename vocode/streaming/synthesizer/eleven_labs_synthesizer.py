@@ -177,25 +177,24 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
                     headers=headers,
                     timeout=aiohttp.ClientTimeout(total=9),
                 )
+                attempts += 1
                 if response.ok:
                     break
                 elif response.status == 429:
-                    self.logger.warning("ElevenLabs' rate limit exceeded. Retrying after delay...")
-                    await asyncio.sleep(delay)
-                    delay = delay * backoff  # Increase delay for next attempt
-                    attempts += 1
+                    raise aiohttp.ClientResponseError(code=429, message="Rate limit exceeded")
+                elif response.status >= 500:
+                    raise aiohttp.ClientResponseError(code=429, message=f"ElevenLabs API returned {response.status} status code")
                 else:
-                    Exception(f"ElevenLabs API returned {response.status} status code")
-            except asyncio.TimeoutError:
-                self.logger.warning("ElevenLabs timed out. Retrying after delay...")
+                    break # Don't retry on other status codes
+            except (aiohttp.ClientResponseError, aiohttp.ClientTimeout, aiohttp.ClientConnectionError) as e:
+                # Sleep and retry for retriable errors
+                self.logger.warning(f"Temporary issue accessing ElevenLabs API: {e}. Retrying after delay...")
                 await asyncio.sleep(delay)
                 delay = delay * backoff  # Increase delay for next attempt
-                attempts += 1
-            except Exception as e:
-                raise e
-
+            
         if not response or not response.ok:
-            raise Exception(f"Failed to retrieve response from ElevenLabs after {attempts} tries for '{message.text}'.")
+            reason = response.status if response else "no response"
+            raise Exception(f"Failed to retrieve response from ElevenLabs after {attempts} tries, reason: {reason}, for text '{message.text}'.")
 
         if self.experimental_streaming:
             lipsync_events = []

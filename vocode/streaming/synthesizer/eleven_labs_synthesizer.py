@@ -188,7 +188,7 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
                     break # Don't retry on other status codes
             except (aiohttp.ClientResponseError, aiohttp.ClientTimeout, aiohttp.ClientConnectionError) as e:
                 # Sleep and retry for retriable errors
-                self.logger.warning(f"Temporary issue accessing ElevenLabs API: {e}. Retrying after delay...")
+                self.logger.warning(f"Temporary issue accessing ElevenLabs API: {e}. Retrying after {delay:.1f}s...")
                 await asyncio.sleep(delay)
                 delay = delay * backoff  # Increase delay for next attempt
             

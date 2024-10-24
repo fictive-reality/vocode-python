@@ -170,6 +170,7 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
         response = None
         while attempts < max_attempts:
             try:
+                attempts += 1
                 response = await session.request(
                     "POST",
                     url,
@@ -177,20 +178,20 @@ class ElevenLabsSynthesizer(BaseSynthesizer[ElevenLabsSynthesizerConfig]):
                     headers=headers,
                     timeout=aiohttp.ClientTimeout(total=9),
                 )
-                attempts += 1
                 if response.ok:
                     break
                 elif response.status == 429:
-                    raise aiohttp.ClientResponseError(code=429, message="Rate limit exceeded")
+                    raise aiohttp.ClientConnectionError("429 Rate limit exceeded") 
                 elif response.status >= 500:
-                    raise aiohttp.ClientResponseError(code=429, message=f"ElevenLabs API returned {response.status} status code")
+                    raise aiohttp.ClientConnectionError(f"ElevenLabs API returned {response.status} status code")
                 else:
                     break # Don't retry on other status codes
-            except (aiohttp.ClientResponseError, aiohttp.ClientTimeout, aiohttp.ClientConnectionError) as e:
+            except (TimeoutError, aiohttp.ClientConnectionError) as e:
                 # Sleep and retry for retriable errors
-                self.logger.warning(f"Temporary issue accessing ElevenLabs API: {e}. Retrying after {delay:.1f}s...")
+                self.logger.warning(f"Temporary issue accessing ElevenLabs API: {e}. Attempt {attempts}, retrying after {delay:.1f}s...")
                 await asyncio.sleep(delay)
                 delay = delay * backoff  # Increase delay for next attempt
+                
             
         if not response or not response.ok:
             reason = response.status if response else "no response"

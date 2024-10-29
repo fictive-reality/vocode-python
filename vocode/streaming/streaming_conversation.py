@@ -818,7 +818,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
         await self.agent.terminate()
 
         self.logger.debug("Terminating output device")
-        self.output_device.terminate()
+        await self.output_device.terminate()
 
         self.logger.debug("Terminating speech transcriber")
         await self.transcriber.terminate()

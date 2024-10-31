@@ -60,10 +60,11 @@ class AsyncGeneratorWrapper(AsyncGenerator[SynthesisResult.ChunkResult, None]):
 
 class CachingSynthesizer(BaseSynthesizer):
 
-    def __init__(self, inner_synthesizer: BaseSynthesizer, cache_path: str = "cache"):
+    def __init__(self, inner_synthesizer: BaseSynthesizer, cache_path: str = "cache", use_cached_synths: bool = True):
         self.should_close_session_on_tear_down = False
         self.inner_synthesizer = inner_synthesizer
         self.cache_path = cache_path
+        self.use_cached_synths = use_cached_synths
         os.makedirs(self.cache_path, exist_ok=True)
     
     @property
@@ -80,7 +81,7 @@ class CachingSynthesizer(BaseSynthesizer):
         await self.inner_synthesizer.set_filler_audios(filler_audio_config)
 
     async def get_phrase_filler_audios(self) -> List[FillerAudio]:
-        return await self.inner_synthesizer.get_phrase_filler_audios();
+        return await self.inner_synthesizer.get_phrase_filler_audios()
 
     def ready_synthesizer(self):
         return self.inner_synthesizer.ready_synthesizer()
@@ -104,7 +105,7 @@ class CachingSynthesizer(BaseSynthesizer):
         config = self.inner_synthesizer.get_synthesizer_config()
         voice_id = get_voice_id(config)
         cached_path = os.path.join(self.cache_path, cache_key(message.text, voice_id, config.json()))
-        if os.path.exists(cached_path):
+        if os.path.exists(cached_path) and self.use_cached_synths:
             with open(cached_path, "rb") as f:
                 result = self.inner_synthesizer.create_synthesis_result_from_wav(f, message, chunk_size)
         else:

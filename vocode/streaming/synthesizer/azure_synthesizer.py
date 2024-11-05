@@ -114,15 +114,20 @@ class SynthesizerPool:
         self._synthesizer_stacks: dict[str, list[SpeechSynthesizer]] = {}
         self._maximum_synthesizers = maximum_synthesizers
 
-    def get(self, speech_config: SpeechConfig, key: str) -> SpeechSynthesizer:
+    def get(self, speech_config: SpeechConfig, key: str, logger: Optional[logging.Logger] = None) -> SpeechSynthesizer:
         if key not in self._synthesizer_stacks:
             self._synthesizer_stacks[key] = []
 
         stack = self._synthesizer_stacks[key]
         if stack:
-            return stack.pop()
+            synth = stack.pop()
+            if logger:
+                logger.debug(f"Getting a synthesizer [{key}] from pool, have {len(stack)} left")
+            return synth
         else:
             synth = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+            if logger:
+                logger.debug(f"Created a new synthesizer [{key}] as pool was empty")
             return synth
 
     def put(self, synth: SpeechSynthesizer, key: str, logger: Optional[logging.Logger] = None):
@@ -133,10 +138,10 @@ class SynthesizerPool:
         if len(stack) < self._maximum_synthesizers:
             stack.append(synth)
             if logger:
-                logger.debug(f"Putting back a synthesizer, now have {len(stack)} in stack")
+                logger.debug(f"Putting back a synthesizer [{key}], now have {len(stack)} in pool")
         else:
             if logger:
-                logger.warning(f"Disposing of a synthesizer as above max number of {self._maximum_synthesizers}.")
+                logger.warning(f"Disposing of a synthesizer [{key}] as above max number of {self._maximum_synthesizers}.")
             synth.stop_speaking_async()
 
 
@@ -259,7 +264,7 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
         viseme_events: list[SpeechSynthesisVisemeEventArgs] = []
         word_events: list[SpeechSynthesisWordBoundaryEventArgs] = []
 
-        synthesizer = self.pool.get(self.speech_config, self.speech_config_key)
+        synthesizer = self.pool.get(self.speech_config, self.speech_config_key, self.logger)
         synthesizer.viseme_received.connect(lambda x: viseme_events.append(x))
         synthesizer.synthesis_word_boundary.connect(lambda x: word_events.append(x))
 

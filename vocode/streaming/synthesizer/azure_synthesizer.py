@@ -114,20 +114,23 @@ class SynthesizerPool:
         self._synthesizer_stacks: dict[str, list[SpeechSynthesizer]] = {}
         self._maximum_synthesizers = maximum_synthesizers
 
-    def get(self, speech_config: SpeechConfig) -> SpeechSynthesizer:
-        key = speech_config_hash(speech_config)
+    def get(self, speech_config: SpeechConfig, key: str, logger: Optional[logging.Logger] = None) -> SpeechSynthesizer:
         if key not in self._synthesizer_stacks:
             self._synthesizer_stacks[key] = []
 
         stack = self._synthesizer_stacks[key]
         if stack:
-            return stack.pop()
+            synth = stack.pop()
+            if logger:
+                logger.debug(f"Getting a synthesizer [{key}] from pool, have {len(stack)} left")
+            return synth
         else:
             synth = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+            if logger:
+                logger.debug(f"Created a new synthesizer [{key}] as pool was empty")
             return synth
 
-    def put(self, synth: SpeechSynthesizer, speech_config: SpeechConfig, logger: Optional[logging.Logger] = None):
-        key = speech_config_hash(speech_config)
+    def put(self, synth: SpeechSynthesizer, key: str, logger: Optional[logging.Logger] = None):
         if key not in self._synthesizer_stacks:
             self._synthesizer_stacks[key] = []
         stack = self._synthesizer_stacks[key]
@@ -135,10 +138,10 @@ class SynthesizerPool:
         if len(stack) < self._maximum_synthesizers:
             stack.append(synth)
             if logger:
-                logger.debug(f"Putting back a synthesizer, now have {len(stack)} in stack")
+                logger.debug(f"Putting back a synthesizer [{key}], now have {len(stack)} in pool")
         else:
             if logger:
-                logger.warning(f"Disposing of a synthesizer as above max number of {self._maximum_synthesizers}.")
+                logger.warning(f"Disposing of a synthesizer [{key}] as above max number of {self._maximum_synthesizers}.")
             synth.stop_speaking_async()
 
 
@@ -193,6 +196,11 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
         self.as_wav = self.synthesizer_config.should_encode_as_wav
         self.logger = logger or logging.getLogger(__name__)
         self.pool = synthesizer_pool
+
+        # Set a key that ensures that the pool don't mix up synthesizers from different regions or output formats
+        # NOTE currently we expect all synthesizer to have the same key
+        # NOTE, if more variables of speech config are used, the hash need to update
+        self.speech_config_key = azure_speech_key + azure_speech_region + speech_config.speech_synthesis_output_format_string
 
     def create_ssml(self, message: str, bot_sentiment: Optional[BotSentiment] = None) -> str:
         ssml_root = ET.fromstring(
@@ -256,7 +264,7 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
         viseme_events: list[SpeechSynthesisVisemeEventArgs] = []
         word_events: list[SpeechSynthesisWordBoundaryEventArgs] = []
 
-        synthesizer = self.pool.get(self.speech_config)
+        synthesizer = self.pool.get(self.speech_config, self.speech_config_key, self.logger)
         synthesizer.viseme_received.connect(lambda x: viseme_events.append(x))
         synthesizer.synthesis_word_boundary.connect(lambda x: word_events.append(x))
 
@@ -302,7 +310,9 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
                 self.logger.debug(
                     f"Ended synthesis for result_id: {result.result_id}, putting back synth {id(synthesizer)}"
                 )
-                self.pool.put(synthesizer, self.speech_config, self.logger)
+                # NOTE we use speech_config_key, not speech_config, because at the time we return here
+                # we might have somehow lost the context causing errors speech_config.
+                self.pool.put(synthesizer, self.speech_config_key, self.logger)
 
         return SynthesisResult(
             chunk_generator(),

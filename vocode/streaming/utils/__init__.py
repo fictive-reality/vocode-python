@@ -121,7 +121,7 @@ def print_visemes(lipsync_events):
 
 def save_as_wav(path, audio_data: bytes, sampling_rate: int):
     if len(audio_data) == 0:
-        logger.error(f"Cannot save an empty WAV file to {path}")
+        logger.error(f"Cannot save an empty WAV file: {path}")
         return
     if os.path.dirname(path):
         os.makedirs(os.path.dirname(path), exist_ok=True)

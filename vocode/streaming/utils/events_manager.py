@@ -11,6 +11,7 @@ class EventsManager:
         self.queue: asyncio.Queue[Event] = asyncio.Queue()
         self.subscriptions = set(subscriptions)
         self.active = False
+        self.current_event_done = asyncio.Event()
 
     def publish_event(self, event: Event):
         if event.type in self.subscriptions:
@@ -21,7 +22,9 @@ class EventsManager:
         while self.active:
             try:
                 event = await self.queue.get()
+                self.current_event_done.clear()
                 await self.handle_event(event)
+                self.current_event_done.set()
             except asyncio.QueueEmpty:
                 await asyncio.sleep(1)
             except asyncio.CancelledError:
@@ -38,3 +41,5 @@ class EventsManager:
                 await self.handle_event(event)
             except asyncio.QueueEmpty:
                 break
+        # Await the start() task to finish any currently processing events as well
+        await self.current_event_done.wait()

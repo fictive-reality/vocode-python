@@ -69,6 +69,8 @@ class OVRLipsyncProcessor:
         return lipsync_events
 
     async def start(self):
+        if self.process is not None:
+            return
         logger.info(f"Starting the process {self.command}")
         self.process = await asyncio.create_subprocess_exec(
             *self.command,
@@ -90,9 +92,11 @@ class OVRLipsyncProcessor:
             if line:
                 logger.info(f"ProcessWAV.exe: {line.decode().strip()}")
             else:
-                break
-    
+                break        
+
     async def process_frame(self, frame_data: bytes):
+        if self.process is None:
+            return None
         async with self.lock:
             try:
                 self.process.stdin.write(frame_data)
@@ -104,11 +108,9 @@ class OVRLipsyncProcessor:
                 return stdout_line.strip()
             except asyncio.CancelledError:
                 return None # We were cancelled, return None
-            except Exception:
-                logger.exception("Error processing frame, restarting ProcessWAV process")
+            except (Exception, asyncio.TimeoutError):
+                logger.exception("Error processing frame, closing the failing process")
                 await self.close()
-                await self.start()
-                return await self.process_frame(frame_data)
 
     async def detect_lipsync(self, audio_data: bytes, audio_offset: float = 0.0):
         """Loops through audio_data in buffer_size chunks and processes each frame, returning a lipsync event list.
@@ -126,14 +128,18 @@ class OVRLipsyncProcessor:
             chunk = audio_data[byte_offset:byte_offset + self.buffer_size]
             byte_offset += self.buffer_size
             if len(chunk) == self.buffer_size:
-                viseme = (await self.process_frame(chunk)).decode()
-                if self.print_as_array:
-                    viseme_arrays.append(self.parse_array(viseme))
-                else:
-                    if viseme and viseme != last_viseme:
+                result = await self.process_frame(chunk)
+                viseme = result.decode() if result else None
+                if viseme:
+                    if self.print_as_array:
+                        viseme_arrays.append(self.parse_array(viseme))
+                    elif viseme != last_viseme:
                         lipsync_events.append({"audio_offset": audio_offset, "viseme_id": f"ovr_{viseme}"})
                     last_viseme = viseme
+                else:
+                    break # If we got no viseme, the process is down and no point in continuing at this level
                 audio_offset = round(audio_offset + self.buffer_ms / 1000, 2)
+        logger.info("Finished processing audio data with ovrlipsync")
         if self.print_as_array:        
             return self.analyze_viseme_arrays(viseme_arrays)
         else:

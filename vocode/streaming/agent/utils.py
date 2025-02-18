@@ -23,42 +23,54 @@ from vocode.streaming.models.transcript import (
 
 SENTENCE_ENDINGS = [".", "!", "?", "\n"]
 
+# Ideas to fool this regex:
+# Abbreviations longer than 4 characters, such as Msss. or Corp.
+
+def mark_commands(text: str) -> str:
+    """Replace command content in brackets with space so it won't trigger sentence boundaries"""
+    def replace_match(match):
+        # Replace command content with equivalent number of underscores
+        return ' ' * len(match.group(0))
+    
+    # Match [...] patterns, handle nested brackets by being non-greedy
+    command_pattern = re.compile(r'\[.*?\]')
+    return command_pattern.sub(replace_match, text)
+
+SENTENCE_BOUNDARY = re.compile(
+    r"""
+    [\r\n]+\s*  # Any number of newlines automatically is a boundary
+    |
+    [。！？]\s* # CJK sentence endings always indicate a boundary
+    |
+    \S{4,}[“"'.!?]\s+(?=[A-ZÖÄÅ]) # A sentence of 4+ non-whitespace chars ending with punctuation and next starting with capital letter
+                                    # This should mean short abbreviations and list items don't get split
+""", re.VERBOSE)
+
+def find_sentence_boundary(buffer: str) -> int:
+    marked_buffer = mark_commands(buffer)
+
+    match = SENTENCE_BOUNDARY.search(marked_buffer)
+    if match:
+        return match.end()
+    return -1
 
 async def collate_response_async(
     gen: AsyncIterable[Union[str, FunctionFragment]],
-    sentence_endings: List[str] = SENTENCE_ENDINGS,
     get_functions: Literal[True, False] = False,
 ) -> AsyncGenerator[Union[str, FunctionCall], None]:
-    sentence_endings_pattern = "|".join(map(re.escape, sentence_endings))
-    list_item_ending_pattern = r"\n"
     buffer = ""
     function_name_buffer = ""
     function_args_buffer = ""
-    prev_ends_with_money = False
     async for token in gen:
         if not token:
             continue
         if isinstance(token, str):
-            if prev_ends_with_money and token.startswith(" "):
-                yield buffer.strip()
-                buffer = ""
-
             buffer += token
-            possible_list_item = bool(re.match(r"^\d+[ .]", buffer))
-            ends_with_money = bool(re.search(r"\$\d+.$", buffer))
-
-            if re.search(
-                list_item_ending_pattern
-                if possible_list_item
-                else sentence_endings_pattern,
-                token,
-            ):
-                if not ends_with_money:
-                    to_return = buffer.strip()
-                    if to_return:
-                        yield to_return
-                    buffer = ""
-            prev_ends_with_money = ends_with_money
+            pos = find_sentence_boundary(buffer)
+            if pos > 0:
+                sentence = buffer[:pos].strip()
+                yield sentence
+                buffer = buffer[pos:]
         elif isinstance(token, FunctionFragment):
             function_name_buffer += token.name
             function_args_buffer += token.arguments
@@ -69,13 +81,21 @@ async def collate_response_async(
         yield FunctionCall(name=function_name_buffer, arguments=function_args_buffer)
 
 async def openai_get_tokens(gen) -> AsyncGenerator[Union[str, FunctionFragment], None]:
-    async for event in gen:
-        choices = event.choices or []
+    async for chunk in gen:
+        # When requesting usage data for streaming, it will come as an extra final token
+        # We yield this in form of bracketed commands that has to be parsed (and removed)
+        # downstream
+        if chunk.usage and chunk.usage.prompt_tokens:
+            yield f"[prompt_tokens: {chunk.usage.prompt_tokens}]"
+        if chunk.usage and chunk.usage.completion_tokens:
+            yield f"[completion_tokens: {chunk.usage.completion_tokens}]"
+        choices = chunk.choices or []        
         if len(choices) == 0:
             break
         choice = choices[0]
         if choice.finish_reason:
-            break
+            yield f"[finish_reason: {choice.finish_reason}]"
+            continue
         delta = choice.delta or {}
         if hasattr(delta, "text") and getattr(delta, "text"):
             token = delta.text

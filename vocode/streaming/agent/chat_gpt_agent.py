@@ -180,9 +180,14 @@ class ChatGPTAgent(RespondAgent[ChatGPTAgentConfig]):
         else:
             chat_parameters = self.get_chat_parameters()
         chat_parameters["stream"] = True
+        chat_parameters["stream_options"] = {"include_usage": True}
+
         stream = await self.openai_async_client.chat.completions.create(**chat_parameters)
 
         async for message in collate_response_async(
             openai_get_tokens(stream), get_functions=True
         ):
-            yield BaseMessage(text=message)
+            if isinstance(message, str):
+                yield BaseMessage(text=message)
+            elif isinstance(message, FunctionCall):
+                yield message

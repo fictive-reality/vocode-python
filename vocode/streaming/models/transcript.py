@@ -187,6 +187,16 @@ class Transcript(BaseModel):
                 event_log.text = text
                 break
 
+    def time_since_last_human_message(self) -> float:
+        for message in self.event_logs[::-1]:
+            if message.sender == Sender.HUMAN:
+                return time.time() - message.timestamp
+        return -1
+    
+    def time_since_start(self) -> float:
+        return time.time() - self.start_time
+
+
 
 class TranscriptEvent(Event, type=EventType.TRANSCRIPT):
     text: str

@@ -1,4 +1,6 @@
 import re
+from math import ceil
+from datetime import timedelta
 from copy import deepcopy
 from typing import (
     Any,
@@ -85,10 +87,14 @@ async def openai_get_tokens(gen) -> AsyncGenerator[Union[str, FunctionFragment],
         # When requesting usage data for streaming, it will come as an extra final token
         # We yield this in form of bracketed commands that has to be parsed (and removed)
         # downstream
-        if chunk.usage and chunk.usage.prompt_tokens:
-            yield f"[prompt_tokens: {chunk.usage.prompt_tokens}]"
-        if chunk.usage and chunk.usage.completion_tokens:
-            yield f"[completion_tokens: {chunk.usage.completion_tokens}]"
+        if chunk.usage:
+            if chunk.usage.prompt_tokens:
+                yield f"[prompt_tokens: {chunk.usage.prompt_tokens}]"
+            if chunk.usage.completion_tokens:
+                yield f"[completion_tokens: {chunk.usage.completion_tokens}]"
+            if chunk.system_fingerprint:
+                yield f"[system_fingerprint: {chunk.system_fingerprint}]"
+
         choices = chunk.choices or []        
         if len(choices) == 0:
             break
@@ -177,11 +183,13 @@ def format_openai_chat_messages_from_transcript(
             idx += 1
 
     for event_log in new_event_logs:
+        seconds = ceil(event_log.timestamp - transcript.start_time)
+        tts = f"[{str(timedelta(seconds=seconds))}] "
         if isinstance(event_log, Message):
             chat_messages.append(
                 {
                     "role": "assistant" if event_log.sender == Sender.BOT else "user",
-                    "content": event_log.text,
+                    "content": f"{tts}{event_log.text}",
                 }
             )
         elif isinstance(event_log, ActionStart):

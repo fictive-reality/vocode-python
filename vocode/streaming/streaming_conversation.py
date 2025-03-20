@@ -700,10 +700,10 @@ class StreamingConversation(Generic[OutputDeviceType]):
         chunk_idx = 0
         duration = 0
         original_text = message.text
-        time_since_human_last_started_speaking = self.transcript.time_since_human_last_started_speaking()
+        time_since_human_started_speaking = self.transcript.time_since_human_started_speaking()
         wait_time = self.transcriber.get_transcriber_config().extra_wait_for_continuation_seconds or 1.0
-        if time_since_human_last_started_speaking > LONGER_HUMAN_TRANSCRIPTION_SEC:
-            self.logger.debug(f"Detected human spoke for long (started {time_since_human_last_started_speaking:.2g}s ago) , waiting {wait_time}s extra for interruption to come in")
+        if time_since_human_started_speaking > LONGER_HUMAN_TRANSCRIPTION_SEC:
+            self.logger.debug(f"Detected human spoke for long (started {time_since_human_started_speaking:.2g}s ago) , waiting {wait_time}s extra for interruption to come in")
             await asyncio.sleep(wait_time)
         async for chunk_result in synthesis_result.chunk_generator:
             span_to_end = None

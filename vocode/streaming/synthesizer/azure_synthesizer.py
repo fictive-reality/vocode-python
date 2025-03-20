@@ -244,7 +244,7 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
         chunk_size: int,
         bot_sentiment: Optional[BotSentiment] = None,
     ) -> SynthesisResult:
-        self.logger.debug(f"Synthesizing message: {message}")
+        # self.logger.debug(f"Synthesizing message: {message}")
 
         # Azure will return no audio for certain strings like "-", "[-", and "!"
         # which causes the `chunk_generator` below to hang. Return an empty

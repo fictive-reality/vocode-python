@@ -74,7 +74,8 @@ from vocode.streaming.utils.worker import (
 )
 
 OutputDeviceType = TypeVar("OutputDeviceType", bound=BaseOutputDevice)
-
+LONGER_INTERRUPTION_SEC = 1
+LONGER_HUMAN_TRANSCRIPTION_SEC = 10
 
 class StreamingConversation(Generic[OutputDeviceType]):
     class QueueingInterruptibleEventFactory(InterruptibleEventFactory):
@@ -140,8 +141,8 @@ class StreamingConversation(Generic[OutputDeviceType]):
                 self.conversation.current_transcription_is_interrupt = (
                     self.conversation.broadcast_interrupt()
                 )
-                if self.conversation.current_transcription_is_interrupt:
-                    self.conversation.logger.debug("sending interrupt")
+                # if self.conversation.current_transcription_is_interrupt:
+                #     self.conversation.logger.debug("sending interrupt")
                 self.conversation.logger.debug("Human started speaking")
 
             transcription.is_interrupt = (
@@ -179,6 +180,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
                         "is_interrupt": transcription.is_interrupt,
                         "path": file_path,
                         "duration": transcription.duration,
+                        "is_final": True
                     },
                 )
                 # we use getattr here to avoid the dependency cycle between VonageCall and StreamingConversation
@@ -240,7 +242,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
                 self.conversation.logger.debug("Sending filler audio to output")
                 self.filler_audio_started_event = threading.Event()
                 await self.conversation.send_speech_to_output(
-                    filler_audio.message.text,
+                    filler_audio.message,
                     filler_synthesis_result,
                     item.interruption_event,
                     filler_audio.seconds_per_chunk,
@@ -328,7 +330,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
                     ):
                         await self.conversation.filler_audio_worker.wait_for_filler_audio_to_finish()
 
-                self.conversation.logger.debug(f"Synthesizing speech for message '{agent_response_message.message}'")
+                self.conversation.logger.debug(f"Synthesizing speech for message '{agent_response_message.message.text}'")
                 synthesis_result = await self.conversation.synthesizer.create_speech(
                     agent_response_message.message,
                     self.chunk_size,
@@ -376,22 +378,12 @@ class StreamingConversation(Generic[OutputDeviceType]):
                     sender=Sender.BOT,
                     metadata=metadata
                 )
-                self.conversation.transcript.add_message(
-                    message=transcript_message,
-                    conversation_id=self.conversation.id,
-                    publish_to_events_manager=False,
-                )
-
-                # Clients may want to show the transcript as soon as the bot starts speaking, not after
-                if self.conversation.output_device and hasattr(self.conversation.output_device, "consume_transcript"):
-                    self.conversation.output_device.consume_transcript(transcript_message)
                     
                 message_sent, cut_off, duration = await self.conversation.send_speech_to_output(
-                    message.text,
+                    transcript_message,
                     synthesis_result,
                     item.interruption_event,
                     TEXT_TO_SPEECH_CHUNK_SIZE_SECONDS,
-                    transcript_message=transcript_message,
                 )
                 # Only approximate duration since we don't know the exact duration of the last chunk
                 metadata["duration"] = duration
@@ -400,13 +392,17 @@ class StreamingConversation(Generic[OutputDeviceType]):
                         message_sent
                     )
                     metadata["cut_off"] = True
+                    if not message_sent:
+                        self.conversation.logger.debug("Aborted bot response as synthesis was cut off at start")
+                        return
                 metadata["is_final"] = True
-
-                # publish the transcript message now that it includes what was said during send_speech_to_output
-                self.conversation.transcript.maybe_publish_transcript_event_from_message(
+                
+                self.conversation.transcript.add_message(
                     message=transcript_message,
                     conversation_id=self.conversation.id,
+                    publish_to_events_manager=True,
                 )
+
                 item.agent_response_tracker.set()
                 self.conversation.logger.debug("Bot response sent: {}".format(message_sent))
                 
@@ -656,12 +652,14 @@ class StreamingConversation(Generic[OutputDeviceType]):
                 interruptible_event = self.interruptible_events.get_nowait()
                 if not interruptible_event.is_interrupted():
                     if interruptible_event.interrupt():
-                        self.logger.debug(f"Interrupting event: {interruptible_event}")
+                        # self.logger.debug(f"Interrupting event: {interruptible_event}")
                         num_interrupts += 1
             except queue.Empty:
                 break
         self.agent.cancel_current_task()
         self.agent_responses_worker.cancel_current_task()
+        if num_interrupts:
+            self.logger.debug(f"Interrupted {num_interrupts} events")
         return num_interrupts > 0
 
     def is_interrupt(self, transcription: Transcription):
@@ -671,11 +669,10 @@ class StreamingConversation(Generic[OutputDeviceType]):
 
     async def send_speech_to_output(
         self,
-        message: str,
+        message: Message,
         synthesis_result: SynthesisResult,
         stop_event: threading.Event,
         seconds_per_chunk: int,
-        transcript_message: Optional[Message] = None,
         started_event: Optional[threading.Event] = None,
     ):
         """
@@ -693,7 +690,6 @@ class StreamingConversation(Generic[OutputDeviceType]):
         if self.transcriber.get_transcriber_config().mute_during_speech:
             self.logger.debug("Muting transcriber")
             self.transcriber.mute()
-        message_sent = message
         cut_off = False
         chunk_size = seconds_per_chunk * get_chunk_size_per_second(
             self.synthesizer.get_synthesizer_config().audio_encoding,
@@ -704,6 +700,11 @@ class StreamingConversation(Generic[OutputDeviceType]):
         )
         chunk_idx = 0
         duration = 0
+        original_text = message.text
+        time_since_human_last_started_speaking = self.transcript.time_since_human_last_started_speaking()
+        if time_since_human_last_started_speaking > LONGER_HUMAN_TRANSCRIPTION_SEC:
+            self.logger.debug(f"Detected human spoke for long (started {time_since_human_last_started_speaking:.2g}s ago) , waiting {LONGER_INTERRUPTION_SEC}s extra for interruption to come in")
+            await asyncio.sleep(LONGER_INTERRUPTION_SEC)
         async for chunk_result in synthesis_result.chunk_generator:
             span_to_end = None
             if chunk_idx == 0 and self.ttr_span:
@@ -714,13 +715,10 @@ class StreamingConversation(Generic[OutputDeviceType]):
                 (len(chunk_result.chunk) - chunks_header_length) / chunk_size
             )
             duration = chunk_idx * seconds_per_chunk
+            message.text = f"{synthesis_result.get_message_up_to(duration)}-" if duration else ""
+
             if stop_event.is_set():
-                self.logger.debug(
-                    "Interrupted, stopping text to speech after {} chunks".format(
-                        chunk_idx
-                    )
-                )
-                message_sent = f"{synthesis_result.get_message_up_to(duration)}-"
+                self.logger.debug(f"Interrupted synthesis, aborting chunk {chunk_idx}, transcript: {message.text}")
                 cut_off = True
                 break
             if chunk_idx == 0:
@@ -732,8 +730,15 @@ class StreamingConversation(Generic[OutputDeviceType]):
             lipsync_events = []
             if synthesis_result.get_lipsync_events:
                 lipsync_events = synthesis_result.get_lipsync_events(duration, duration + seconds_per_chunk)
+            self.logger.debug(
+                "Starting to send chunk {} with size {}".format(chunk_idx, len(chunk_result.chunk))
+            )
             self.output_device.consume_nonblocking(chunk_result.chunk, lipsync_events, span_to_end)
-
+            # Send partial updates of the message sent so far, assuming that the identical timestamps means
+            # the message is replaced on client side
+            if message.text and self.output_device and hasattr(self.output_device, "consume_transcript"):
+                self.output_device.consume_transcript(message)
+            
             end_time = time.time()
             await asyncio.sleep(
                 max(
@@ -742,9 +747,6 @@ class StreamingConversation(Generic[OutputDeviceType]):
                     - self.per_chunk_allowance_seconds,
                     0,
                 )
-            )
-            self.logger.debug(
-                "Sent chunk {} with size {}".format(chunk_idx, len(chunk_result.chunk))
             )
 
             self.mark_last_action_timestamp()
@@ -759,13 +761,14 @@ class StreamingConversation(Generic[OutputDeviceType]):
         if synthesis_result.get_lipsync_events:
             # Debug log to show all visemes from start to some max (1000s). Remove when not needed.
             lipsync_events = synthesis_result.get_lipsync_events(0, 1000)
-            self.logger.debug(message_sent + ":\n" + print_visemes(lipsync_events))
+            self.logger.debug(message.text + ":\n" + print_visemes(lipsync_events))
         if self.transcriber.get_transcriber_config().mute_during_speech:
             self.logger.debug("Unmuting transcriber")
             self.transcriber.unmute()
-        if transcript_message:
-            transcript_message.text = message_sent
-        return message_sent, cut_off, duration
+        if not cut_off and original_text != message.text:
+            message.text = original_text
+
+        return message.text, cut_off, duration
 
     def mark_terminated(self):
         self.active = False

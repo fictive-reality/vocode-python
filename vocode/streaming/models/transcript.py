@@ -192,6 +192,19 @@ class Transcript(BaseModel):
             if message.sender == Sender.HUMAN:
                 return time.time() - message.timestamp
         return -1
+
+    def time_since_human_started_speaking(self) -> float:
+        human_started_at = None
+        for message in self.event_logs[::-1]:
+            if message.sender == Sender.BOT:
+                if human_started_at:
+                    return time.time() - human_started_at
+                else:
+                    # Last speaker was bot
+                    return -1
+            elif message.sender == Sender.HUMAN:
+                human_started_at = message.timestamp
+        return -1
     
     def time_since_start(self) -> float:
         return time.time() - self.start_time

@@ -698,8 +698,10 @@ class StreamingConversation(Generic[OutputDeviceType]):
             44 if self.synthesizer.get_synthesizer_config().should_encode_as_wav else 0
         )
         chunk_idx = 0
-        duration = 0
+        chunk_start = 0
+        chunk_end = 0
         original_text = message.text
+        message.text = "" # Nothing said yet
         time_since_human_started_speaking = self.transcript.time_since_human_started_speaking()
         wait_time = self.transcriber.get_transcriber_config().extra_wait_for_continuation_seconds or 1.0
         if time_since_human_started_speaking > LONGER_HUMAN_TRANSCRIPTION_SEC:
@@ -714,8 +716,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
             speech_length_seconds = seconds_per_chunk * (
                 (len(chunk_result.chunk) - chunks_header_length) / chunk_size
             )
-            duration = chunk_idx * seconds_per_chunk
-            message.text = f"{synthesis_result.get_message_up_to(duration)}-" if duration else ""
+            chunk_end = chunk_start + seconds_per_chunk
 
             if stop_event.is_set():
                 self.logger.debug(f"Interrupted synthesis, aborting chunk {chunk_idx}, transcript: {message.text}")
@@ -724,19 +725,21 @@ class StreamingConversation(Generic[OutputDeviceType]):
             if chunk_idx == 0:
                 if started_event:
                     started_event.set()
+            message.text = f"{synthesis_result.get_message_up_to(chunk_end)}-"
+
             if not chunk_result or not chunk_result.chunk:
                 self.logger.warning("No chunk to send")
                 break
             lipsync_events = []
             if synthesis_result.get_lipsync_events:
-                lipsync_events = synthesis_result.get_lipsync_events(duration, duration + seconds_per_chunk)
+                lipsync_events = synthesis_result.get_lipsync_events(chunk_start, chunk_end)
             self.logger.debug(
                 "Starting to send chunk {} with size {}".format(chunk_idx, len(chunk_result.chunk))
             )
             self.output_device.consume_nonblocking(chunk_result.chunk, lipsync_events, span_to_end)
             # Send partial updates of the message sent so far, assuming that the identical timestamps means
             # the message is replaced on client side
-            if message.text and self.output_device and hasattr(self.output_device, "consume_transcript"):
+            if self.output_device and hasattr(self.output_device, "consume_transcript"):
                 self.output_device.consume_transcript(message)
             
             end_time = time.time()
@@ -751,7 +754,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
 
             self.mark_last_action_timestamp()
             chunk_idx += 1
-            duration += seconds_per_chunk
+            chunk_start = chunk_end
             # if transcript_message:
             #     transcript_message.text = synthesis_result.get_message_up_to(
             #         duration
@@ -768,7 +771,7 @@ class StreamingConversation(Generic[OutputDeviceType]):
         if not cut_off and original_text != message.text:
             message.text = original_text
 
-        return message.text, cut_off, duration
+        return message.text, cut_off, chunk_start
 
     def mark_terminated(self):
         self.active = False

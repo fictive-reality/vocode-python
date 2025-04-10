@@ -15,6 +15,7 @@ class BaseMessage(TypedModel, type=MessageType.BASE):  # type: ignore
     text: str
     trailing_silence_seconds: float = 0.0
     cache_phrase: Optional[str] = None
+    metadata: dict = {}
 
 
 class SSMLMessage(BaseMessage, type=MessageType.SSML):  # type: ignore

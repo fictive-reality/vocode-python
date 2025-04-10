@@ -26,8 +26,11 @@ class WebsocketOutputDevice(RateLimitInterruptionsOutputDevice):
     def mark_closed(self):
         self.active = False
 
-    async def play(self, chunk: bytes):
-        await self.ws.send_text(AudioMessage.from_bytes(chunk).json())
+    async def play(self, chunk: bytes, lipsync_events: list | None = None):
+        audio_message = AudioMessage.from_bytes(chunk)
+        if lipsync_events:
+            audio_message.lipsync_events = lipsync_events
+        await self.ws.send_text(audio_message.json())
 
     async def send_transcript(self, event: TranscriptEvent):
         if self.active:

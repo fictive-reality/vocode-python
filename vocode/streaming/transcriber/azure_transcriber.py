@@ -2,6 +2,7 @@ import queue
 from datetime import datetime, timezone
 
 import sentry_sdk
+from azure.cognitiveservices.speech import SpeechRecognitionEventArgs
 from azure.cognitiveservices.speech.audio import (
     AudioStreamFormat,
     AudioStreamWaveFormat,
@@ -10,11 +11,14 @@ from azure.cognitiveservices.speech.audio import (
 from loguru import logger
 
 from vocode import getenv
+from vocode.logging import copy_logger_context
 from vocode.streaming.models.audio import AudioEncoding
 from vocode.streaming.models.transcriber import AzureTranscriberConfig, Transcription
 from vocode.streaming.transcriber.base_transcriber import BaseThreadAsyncTranscriber
 from vocode.utils.sentry_utils import CustomSentrySpans, sentry_create_span
 
+TICKS_PER_MS = 10000
+TICKS_PER_S = 10000000
 
 class AzureTranscriber(BaseThreadAsyncTranscriber[AzureTranscriberConfig]):
     def __init__(
@@ -22,7 +26,8 @@ class AzureTranscriber(BaseThreadAsyncTranscriber[AzureTranscriberConfig]):
         transcriber_config: AzureTranscriberConfig,
     ):
         super().__init__(transcriber_config)
-
+        # Copy context vars from current logger to local so logging in transcriber threads has same context
+        self.logger = logger.bind(**copy_logger_context())
         format = None
         if self.transcriber_config.audio_encoding == AudioEncoding.LINEAR16:
             format = AudioStreamFormat(
@@ -46,6 +51,12 @@ class AzureTranscriber(BaseThreadAsyncTranscriber[AzureTranscriberConfig]):
             subscription=getenv("AZURE_SPEECH_KEY"),
             region=getenv("AZURE_SPEECH_REGION"),
         )
+
+        if self.transcriber_config.segmentation_silence_timeout_ms is not None:
+            speech_config.set_property(speechsdk.PropertyId.Speech_SegmentationSilenceTimeoutMs, str(self.transcriber_config.segmentation_silence_timeout_ms))
+
+        if self.transcriber_config.initial_silence_timeout_ms is not None:
+            speech_config.set_property(speechsdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, str(self.transcriber_config.initial_silence_timeout_ms))
 
         speech_params = {
             "speech_config": speech_config,
@@ -72,7 +83,7 @@ class AzureTranscriber(BaseThreadAsyncTranscriber[AzureTranscriberConfig]):
         self._ended = False
         self.is_ready = False
 
-    def recognized_sentence_final(self, evt):
+    def recognized_sentence_final(self, evt: SpeechRecognitionEventArgs):
 
         sentry_create_span(
             sentry_callable=sentry_sdk.start_span,
@@ -80,31 +91,31 @@ class AzureTranscriber(BaseThreadAsyncTranscriber[AzureTranscriberConfig]):
             start_timestamp=datetime.now(tz=timezone.utc),
         )
         self.produce_nonblocking(
-            Transcription(message=evt.result.text, confidence=1.0, is_final=True)
+            Transcription(message=evt.result.text, confidence=1.0, is_final=True, offset_seconds=evt.result.offset / TICKS_PER_S, duration_seconds=evt.result.duration / TICKS_PER_S)
         )
 
-    def recognized_sentence_stream(self, evt):
+    def recognized_sentence_stream(self, evt: SpeechRecognitionEventArgs):
         self.produce_nonblocking(
-            Transcription(message=evt.result.text, confidence=1.0, is_final=False)
+            Transcription(message=evt.result.text, confidence=1.0, is_final=False, offset_seconds=evt.result.offset / TICKS_PER_S, duration_seconds=evt.result.duration / TICKS_PER_S)
         )
 
     def _run_loop(self):
         stream = self.generator()
 
         def stop_cb(evt):
-            logger.debug("CLOSING on {}".format(evt))
+            self.logger.debug("CLOSING on {}".format(evt))
             self.speech.stop_continuous_recognition()
             self._ended = True
 
         self.speech.recognizing.connect(lambda x: self.recognized_sentence_stream(x))
         self.speech.recognized.connect(lambda x: self.recognized_sentence_final(x))
         self.speech.session_started.connect(
-            lambda evt: logger.debug("SESSION STARTED: {}".format(evt))
+            lambda evt: self.logger.debug("SESSION STARTED: {}".format(evt))
         )
         self.speech.session_stopped.connect(
-            lambda evt: logger.debug("SESSION STOPPED {}".format(evt))
+            lambda evt: self.logger.debug("SESSION STOPPED {}".format(evt))
         )
-        self.speech.canceled.connect(lambda evt: logger.debug("CANCELED {}".format(evt)))
+        self.speech.canceled.connect(lambda evt: self.logger.debug("CANCELED {}".format(evt)))
 
         self.speech.session_stopped.connect(stop_cb)
         self.speech.canceled.connect(stop_cb)

@@ -152,18 +152,25 @@ def format_openai_chat_messages_from_transcript(
 async def openai_get_tokens(
     gen: AsyncGenerator[ChatCompletionChunk, None],
 ) -> AsyncGenerator[Union[str, FunctionFragment], None]:
-    async for event in gen:
-        choices = event.choices
+    async for chunk in gen:
+        # When requesting usage data for streaming, it will come as an extra final token
+        # We yield this in form of bracketed commands that has to be parsed (and removed)
+        # downstream
+        if chunk.usage:
+            if chunk.usage.prompt_tokens:
+                yield f"[prompt_tokens: {chunk.usage.prompt_tokens}]"
+            if chunk.usage.completion_tokens:
+                yield f"[completion_tokens: {chunk.usage.completion_tokens}]"
+            if chunk.system_fingerprint:
+                yield f"[system_fingerprint: {chunk.system_fingerprint}]"
+        
+        choices = chunk.choices or []
         if len(choices) == 0:
             continue
         choice = choices[0]
         if choice.finish_reason:
-            if choice.finish_reason == "content_filter":
-                logger.warning(
-                    "Detected content filter.",
-                    extra={"chat_completion_chunk": event.model_dump()},
-                )
-            break
+            yield f"[finish_reason: {choice.finish_reason}]"
+            continue
         delta = choice.delta
         if delta.content is not None:
             token = delta.content

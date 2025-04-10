@@ -72,14 +72,14 @@ class SynthesizerConfig(TypedModel, type=SynthesizerType.BASE.value):  # type: i
 
 AZURE_SYNTHESIZER_DEFAULT_VOICE_NAME = "en-US-SteffanNeural"
 AZURE_SYNTHESIZER_DEFAULT_PITCH = 0
-AZURE_SYNTHESIZER_DEFAULT_RATE = 15
+AZURE_SYNTHESIZER_DEFAULT_RATE = 0 # From -100 (%) to +100 (%)
 
 
 class AzureSynthesizerConfig(SynthesizerConfig, type=SynthesizerType.AZURE.value):  # type: ignore
     voice_name: str = AZURE_SYNTHESIZER_DEFAULT_VOICE_NAME
     pitch: int = AZURE_SYNTHESIZER_DEFAULT_PITCH
     rate: int = AZURE_SYNTHESIZER_DEFAULT_RATE
-    language_code: str = "en-US"
+    language_code: str | None = None
 
 
 DEFAULT_GOOGLE_LANGUAGE_CODE = "en-US"

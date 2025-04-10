@@ -26,6 +26,7 @@ class Message(EventLog):
     is_final: bool = False
     is_backchannel: bool = False
     is_end_of_turn: bool = False
+    metadata: dict = {}
 
     def to_string(
         self,
@@ -109,6 +110,7 @@ class TranscriptEvent(Event, type=EventType.TRANSCRIPT):  # type: ignore
     text: str
     sender: Sender
     timestamp: float
+    metadata: dict = {}
 
     def to_string(self, include_timestamp: bool = False) -> str:
         if include_timestamp:
@@ -154,6 +156,7 @@ class Transcript(BaseModel):
                     sender=message.sender,
                     timestamp=message.timestamp,
                     conversation_id=conversation_id,
+                    metadata=message.metadata,
                 )
             )
 
@@ -164,8 +167,13 @@ class Transcript(BaseModel):
         conversation_id: str,
         is_final: bool = False,
         is_backchannel: bool = False,
+        metadata: Optional[dict] = None,
         publish_to_events_manager: bool = True,
     ):
+        metadata = metadata or {}
+        duration = metadata.get("duration", 0) if metadata else 0
+        # Current time is when a message has been finished transcribing/synthesizing, so
+        # timestamp of the start must be calculated by subtracting the duration
         timestamp = time.time()
         message = Message(
             text=text,
@@ -173,6 +181,7 @@ class Transcript(BaseModel):
             timestamp=timestamp,
             is_final=is_final,
             is_backchannel=is_backchannel,
+            metadata=metadata
         )
         self.event_logs.append(message)
         if publish_to_events_manager:
@@ -192,20 +201,22 @@ class Transcript(BaseModel):
                 message=message, conversation_id=conversation_id
             )
 
-    def add_human_message(self, text: str, conversation_id: str, is_backchannel: bool = False):
+    def add_human_message(self, text: str, conversation_id: str, is_backchannel: bool = False, metadata: Optional[dict] = None):
         self.add_message_from_props(
             text=text,
             sender=Sender.HUMAN,
             conversation_id=conversation_id,
             is_backchannel=is_backchannel,
+            metadata=metadata,
         )
 
-    def add_bot_message(self, text: str, conversation_id: str, is_final: bool = False):
+    def add_bot_message(self, text: str, conversation_id: str, is_final: bool = False, metadata: Optional[dict] = None):
         self.add_message_from_props(
             text=text,
             sender=Sender.BOT,
             conversation_id=conversation_id,
             is_final=is_final,
+            metadata=metadata,
         )
 
     def get_last_user_message(self):
@@ -271,6 +282,28 @@ class Transcript(BaseModel):
             last_bot_message = bot_messages[-1]
             return not last_bot_message.is_final or not last_bot_message.is_end_of_turn
         return False
+
+    def time_since_last_human_message(self) -> float:
+        for message in self.event_logs[::-1]:
+            if message.sender == Sender.HUMAN:
+                return time.time() - message.timestamp
+        return -1
+
+    def time_since_human_started_speaking(self) -> float:
+        human_started_at = None
+        for message in self.event_logs[::-1]:
+            if message.sender == Sender.BOT:
+                if human_started_at:
+                    return time.time() - human_started_at
+                else:
+                    # Last speaker was bot
+                    return -1
+            elif message.sender == Sender.HUMAN:
+                human_started_at = message.timestamp
+        return -1
+    
+    def time_since_start(self) -> float:
+        return time.time() - self.start_time
 
 
 class TranscriptCompleteEvent(Event, type=EventType.TRANSCRIPT_COMPLETE):  # type: ignore

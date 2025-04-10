@@ -43,8 +43,10 @@ class RateLimitInterruptionsOutputDevice(AbstractOutputDevice):
                 self.audio_encoding,
                 self.sampling_rate,
             )
-            await self.play(audio_chunk.data)
+            # Logically better to run on_play after, but must run before so we can write lipsync_events into
+            # the chunk. Yes, hacky, like most of Vocode.
             audio_chunk.on_play()
+            await self.play(audio_chunk.data, audio_chunk.lipsync_events)
             audio_chunk.state = ChunkState.PLAYED
             end_time = time.time()
             await asyncio.sleep(
@@ -58,7 +60,7 @@ class RateLimitInterruptionsOutputDevice(AbstractOutputDevice):
             self.interruptible_event.is_interruptible = False
 
     @abstractmethod
-    async def play(self, chunk: bytes):
+    async def play(self, chunk: bytes, lipsync_events: list | None = None):
         """Sends an audio chunk to immediate playback"""
         pass
 

@@ -13,6 +13,7 @@ class ChunkState(int, Enum):
 @dataclass
 class AudioChunk:
     data: bytes
+    lipsync_events: list | None = None
     state: ChunkState = ChunkState.UNPLAYED
     chunk_id: UUID = field(default_factory=uuid.uuid4)
 

@@ -139,6 +139,11 @@ class GoogleTranscriberConfig(TranscriberConfig, type=TranscriberType.GOOGLE.val
 class AzureTranscriberConfig(TranscriberConfig, type=TranscriberType.AZURE.value):  # type: ignore
     language: str = AZURE_DEFAULT_LANGUAGE
     candidate_languages: Optional[List[str]] = None
+    # https://learn.microsoft.com/en-gb/azure/cognitive-services/speech-service/how-to-recognize-speech?pivots=programming-language-csharp#change-how-silence-is-handled
+    # Defines how long silence between utterances to separate them into different transcriptions, default is 500ms
+    initial_silence_timeout_ms: Optional[int] = None
+    # Defines how long silence initially to return a NoMatch result, default is 15000 ms
+    segmentation_silence_timeout_ms: Optional[int] = None
 
 
 class AssemblyAITranscriberConfig(
@@ -168,6 +173,7 @@ class Transcription(BaseModel):
     is_interrupt: bool = False
     bot_was_in_medias_res: bool = False
     duration_seconds: Optional[float] = None  # gets added only on final transcription
+    offset_seconds: float = 0
 
     def __str__(self):
         return (

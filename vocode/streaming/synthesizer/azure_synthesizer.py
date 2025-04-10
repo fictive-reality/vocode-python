@@ -120,7 +120,7 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
                 synthesizer_config.voice_name,
                 str(synthesizer_config.pitch),
                 str(synthesizer_config.rate),
-                synthesizer_config.language_code,
+                synthesizer_config.language_code or "nolang",
                 synthesizer_config.audio_encoding,
             )
         )
@@ -205,7 +205,7 @@ class AzureSynthesizer(BaseSynthesizer[AzureSynthesizerConfig]):
         )
         voice = ElementTree.SubElement(ssml_root, "voice")
         voice.set("name", synthesizer_config.voice_name)
-        if synthesizer_config.language_code != "en-US":
+        if synthesizer_config.language_code and synthesizer_config.language_code != "en-US":
             lang = ElementTree.SubElement(voice, "{%s}lang" % NAMESPACES.get(""))
             lang.set("xml:lang", synthesizer_config.language_code)
             voice_root = lang

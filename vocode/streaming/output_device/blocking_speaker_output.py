@@ -58,7 +58,7 @@ class BlockingSpeakerOutput(RateLimitInterruptionsOutputDevice):
         super().__init__(sampling_rate=sampling_rate, audio_encoding=audio_encoding)
         self.playback_worker = _PlaybackWorker(device_info=device_info, sampling_rate=sampling_rate)
 
-    async def play(self, chunk):
+    async def play(self, chunk, lipsync_events: list | None = None):
         self.playback_worker.consume_nonblocking(chunk)
 
     def start(self) -> asyncio.Task:

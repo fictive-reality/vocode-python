@@ -390,11 +390,13 @@ class RespondAgent(BaseAgent[AgentConfigType]):
         try:
             agent_input = item.payload
             if isinstance(agent_input, TranscriptionAgentInput):
+                pass
                 transcription = typing.cast(TranscriptionAgentInput, agent_input).transcription
-                self.transcript.add_human_message(
-                    text=transcription.message,
-                    conversation_id=agent_input.conversation_id,
-                )
+                # We are doing this in TranscriptionWorker instead to more easily add metadata
+                # self.transcript.add_human_message(
+                #     text=transcription.message,
+                #     conversation_id=agent_input.conversation_id,
+                # )
             elif isinstance(agent_input, ActionResultAgentInput):
                 self.transcript.add_action_finish_log(
                     action_input=agent_input.action_input,
@@ -453,14 +455,15 @@ class RespondAgent(BaseAgent[AgentConfigType]):
             else:
                 should_stop = await self.handle_respond(transcription, agent_input.conversation_id)
 
-            if should_stop:
-                logger.debug("Agent requested to stop")
-                self.agent_responses_consumer.consume_nonblocking(
-                    self.interruptible_event_factory.create_interruptible_agent_response_event(
-                        AgentResponseStop(),
-                    )
-                )
-                return
+            # Handle stop using metadata["stop"] instead
+            # if should_stop:
+            #     logger.debug("Agent requested to stop")
+            #     self.agent_responses_consumer.consume_nonblocking(
+            #         self.interruptible_event_factory.create_interruptible_agent_response_event(
+            #             AgentResponseStop(),
+            #         )
+            #     )
+            #     return
         except asyncio.CancelledError:
             pass
 

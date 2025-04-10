@@ -46,7 +46,7 @@ from vocode.streaming.models.agent import FillerAudioConfig
 from vocode.streaming.models.events import Sender
 from vocode.streaming.models.message import BaseMessage, BotBackchannel, LLMToken, SilenceMessage
 from vocode.streaming.models.transcriber import TranscriberConfig, Transcription
-from vocode.streaming.models.transcript import Message, Transcript, TranscriptCompleteEvent
+from vocode.streaming.models.transcript import Message, Transcript, TranscriptCompleteEvent, TranscriptEvent
 from vocode.streaming.output_device.abstract_output_device import AbstractOutputDevice
 from vocode.streaming.output_device.audio_chunk import AudioChunk, ChunkState
 from vocode.streaming.synthesizer.base_synthesizer import (
@@ -61,6 +61,8 @@ from vocode.streaming.utils import (
     create_conversation_id,
     enumerate_async_iter,
     get_chunk_size_per_second,
+    save_as_wav,
+    trim_audio,
 )
 from vocode.streaming.utils.audio_pipeline import AudioPipeline, OutputDeviceType
 from vocode.streaming.utils.create_task import asyncio_create_task
@@ -71,7 +73,6 @@ from vocode.streaming.utils.worker import (
     AbstractWorker,
     AsyncQueueWorker,
     InterruptibleAgentResponseEvent,
-    InterruptibleAgentResponseWorker,
     InterruptibleEvent,
     InterruptibleEventFactory,
     InterruptibleWorker,
@@ -107,6 +108,7 @@ BACKCHANNEL_PATTERNS = [
     "makes sense",
 ]
 LOW_INTERRUPT_SENSITIVITY_BACKCHANNEL_UTTERANCE_LENGTH_THRESHOLD = 3
+LONGER_HUMAN_TRANSCRIPTION_SEC = 10
 
 
 class StreamingConversation(AudioPipeline[OutputDeviceType]):
@@ -276,13 +278,33 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
                     logger.debug(
                         f"Interrupting transcription: {transcription.message}, confidence: {transcription.confidence}"
                     )
-                    logger.debug("sent interrupt")
+                    # logger.debug("sent interrupt")
                 logger.debug("Human started speaking")
                 self.conversation.is_human_still_there = True
 
             transcription.is_interrupt = self.conversation.current_transcription_is_interrupt
             self.conversation.is_human_speaking = not transcription.is_final
             if transcription.is_final:
+                file_path = None
+                # If no duration, it's a text message and we don't need to handle the audio
+                if transcription.duration_seconds is not None:
+                    file_path = f"cache/{self.conversation.id}/transcript_{len(self.conversation.transcript.event_logs)}.wav"
+                    t_config = self.conversation.transcriber.get_transcriber_config()
+                    save_as_wav(
+                        file_path,
+                        trim_audio(
+                            t_config.sampling_rate,
+                            self.conversation.input_audio_buffer,
+                            self.conversation.total_audio_bytes,
+                            transcription.offset_seconds,
+                            transcription.duration_seconds,
+                        ),
+                        t_config.sampling_rate,
+                    )
+                    # Empty buffer to save space
+                    # TODO reactivate when we know why trim bugs happen?
+                    # self.conversation.input_audio_buffer = bytearray()
+                
                 self.has_associated_ignored_utterance = False
                 self.has_associated_unignored_utterance = False
                 agent_response_tracker = None
@@ -306,6 +328,20 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
 
                 self.conversation.warmup_synthesizer()
 
+                # Note, in upstream add_human_message is called in BaseAgent, but there we don't
+                # have access to the audio file path. So we moved it back, but it would break if we use
+                # ActionAgents
+                self.conversation.transcript.add_human_message(
+                    text=transcription.message,
+                    conversation_id=self.conversation.id,
+                    metadata={
+                        "confidence": transcription.confidence,
+                        "is_interrupt": transcription.is_interrupt,
+                        "path": file_path,
+                        "duration": transcription.duration_seconds,
+                        "is_final": True
+                    },
+                )
                 # we use getattr here to avoid the dependency cycle between PhoneConversation and StreamingConversation
                 event = self.interruptible_event_factory.create_interruptible_event(
                     TranscriptionAgentInput(
@@ -543,17 +579,23 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
         ):
             try:
                 message, synthesis_result = item.payload
+
                 if isinstance(message, EndOfTurn):
                     if self.last_transcript_message is not None:
                         self.last_transcript_message.is_end_of_turn = True
                     item.agent_response_tracker.set()
                     return
                 assert synthesis_result is not None
+
+                metadata = message.metadata or {}
+                metadata["is_final"] = False
+
                 # create an empty transcript message and attach it to the transcript
                 transcript_message = Message(
                     text="",
                     sender=Sender.BOT,
                     is_backchannel=isinstance(message, BotBackchannel),
+                    metadata=metadata
                 )
                 if not isinstance(message, SilenceMessage):
                     self.conversation.transcript.add_message(
@@ -572,16 +614,28 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
                     TEXT_TO_SPEECH_CHUNK_SIZE_SECONDS,
                     transcript_message=transcript_message,
                 )
+
+                item.agent_response_tracker.set()
+                if cut_off:
+                    self.conversation.agent.update_last_bot_message_on_cut_off(message_sent)
+                    if not message_sent:
+                        logger.debug("Cut off message was empty, not sending to transcript")
+                        return
+                logger.debug("Bot response sent: {}".format(message_sent))
+                self.last_transcript_message = transcript_message
+
                 # publish the transcript message now that it includes what was said during send_speech_to_output
                 self.conversation.transcript.maybe_publish_transcript_event_from_message(
                     message=transcript_message,
                     conversation_id=self.conversation.id,
                 )
-                item.agent_response_tracker.set()
-                logger.debug("Message sent: {}".format(message_sent))
-                if cut_off:
-                    self.conversation.agent.update_last_bot_message_on_cut_off(message_sent)
-                self.last_transcript_message = transcript_message
+
+                if metadata.get("stop"):
+                    logger.debug("Agent requested to stop")
+                    # Shield the call, because when we terminate, a brodacast_interrupt is sent
+                    # which in turn cancels this process task
+                    await asyncio.shield(self.conversation.terminate())
+                    return
             except asyncio.CancelledError:
                 pass
 
@@ -691,6 +745,8 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
         return ConversationStateManager(conversation=self)
 
     async def start(self, mark_ready: Optional[Callable[[], Awaitable[None]]] = None):
+        self.input_audio_buffer = bytearray()
+        self.total_audio_bytes = 0
         self.transcriber.start()
         self.transcriber.streaming_conversation = self
         self.transcriptions_worker.start()
@@ -812,8 +868,11 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
         )
         self.transcriptions_worker.consume_nonblocking(transcription)
 
-    def consume_nonblocking(self, item: bytes):
-        self.transcriber.send_audio(item)
+    def consume_nonblocking(self, chunk: bytes):
+        # Store incoming audio to be able to send out
+        self.input_audio_buffer += chunk
+        self.total_audio_bytes += len(chunk)
+        self.transcriber.send_audio(chunk)
 
     def warmup_synthesizer(self):
         self.synthesizer.ready_synthesizer(self._get_synthesizer_chunk_size())
@@ -900,10 +959,12 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
         Returns the message that was sent up to, and a flag if the message was cut off
         """
         seconds_spoken = 0.0
+        last_text = ""
 
         def create_on_play_callback(
             chunk_idx: int,
             processed_event: asyncio.Event,
+            audio_chunk: AudioChunk,
         ):
             def _on_play():
                 if chunk_idx == 0:
@@ -913,12 +974,35 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
                         self._track_first_chunk(first_chunk_span, synthesis_result)
 
                 nonlocal seconds_spoken
+                nonlocal last_text
 
                 self.mark_last_action_timestamp()
 
                 seconds_spoken += seconds_per_chunk
+                # Send collect lipsync data per chunk and send partial text updates to client
+                if synthesis_result.get_lipsync_events:
+                    audio_chunk.lipsync_events = synthesis_result.get_lipsync_events(max(0, seconds_spoken - seconds_per_chunk), seconds_spoken)
+                    #logger.debug(f"Lipsync events at {seconds_spoken}s, chunk {chunk_idx}: {print_visemes(audio_chunk.lipsync_events)}")
+
                 if transcript_message:
-                    transcript_message.text = synthesis_result.get_message_up_to(seconds_spoken)
+                    partial_text = synthesis_result.get_message_up_to(seconds_spoken)
+                    transcript_message.text = partial_text
+                    if last_text != transcript_message.text and hasattr(self.output_device, "send_transcript"):
+                        # logger.debug(f"Sending updated partial transcript '{transcript_message.text}' up to {seconds_spoken}s, chunk {chunk_idx}")
+                        te = TranscriptEvent(
+                            conversation_id=self.id,
+                            text=transcript_message.text,
+                            sender=Sender.BOT,
+                            timestamp=transcript_message.timestamp,
+                            metadata=transcript_message.metadata,
+                        )
+                        try:
+                            asyncio.create_task(self.output_device.send_transcript(te))
+                        except Exception as e:
+                            logger.error(
+                                f"Error sending transcript message: {e}",
+                            )
+                        last_text = transcript_message.text
 
                 processed_event.set()
 
@@ -943,7 +1027,6 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
         interrupted_before_all_chunks_sent = False
         async for chunk_idx, chunk_result in enumerate_async_iter(synthesis_result.chunk_generator):
             if stop_event.is_set():
-                logger.debug("Interrupted before all chunks were sent")
                 interrupted_before_all_chunks_sent = True
                 break
             processed_event = asyncio.Event()
@@ -951,7 +1034,7 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
                 data=chunk_result.chunk,
             )
             # register callbacks
-            setattr(audio_chunk, "on_play", create_on_play_callback(chunk_idx, processed_event))
+            setattr(audio_chunk, "on_play", create_on_play_callback(chunk_idx, processed_event, audio_chunk))
             setattr(
                 audio_chunk,
                 "on_interrupt",
@@ -969,7 +1052,11 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
             audio_chunks.append(audio_chunk)
             processed_events.append(processed_event)
 
-        logger.debug("Finished sending chunks to the output device")
+        await synthesis_result.chunk_generator.aclose()
+        if interrupted_before_all_chunks_sent:
+            logger.debug("Interrupted before all chunks were sent")
+        else:
+            logger.debug(f"Finished sending {len(audio_chunks)} chunks to the output device")
 
         if processed_events:
             await processed_events[-1].wait()
@@ -993,8 +1080,30 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
         if self.transcriber.get_transcriber_config().mute_during_speech:
             logger.debug("Unmuting transcriber")
             self.transcriber.unmute()
+        # Save the synthesized audio to disk cache for uploading
+        synth_config = self.synthesizer.get_synthesizer_config()
+        if synth_config.should_encode_as_wav:
+            # Remove WAV headers to avoid glitches
+            data = b"".join(
+                [x.data[44:] for x in audio_chunks if x.state.value == ChunkState.PLAYED]
+            )
+        else:
+            data = b"".join(
+                [x.data for x in audio_chunks if x.state.value == ChunkState.PLAYED]
+            )
+        file_path = None
+        if len(data):
+            sample_rate = synth_config.sampling_rate
+            file_path = f"cache/{self.id}/synthesis_{len(self.transcript.event_logs)}.wav"
+            save_as_wav(file_path, data, sample_rate)
         if transcript_message:
-            transcript_message.is_final = not cut_off
+            transcript_message.is_final = True
+            transcript_message.metadata["is_final"] = True
+            transcript_message.metadata["duration"] = seconds_spoken
+            if cut_off:
+                transcript_message.metadata["cut_off"] = cut_off
+            if file_path:
+                transcript_message.metadata["path"] = file_path
         message_sent = transcript_message.text if transcript_message and cut_off else message
         if synthesis_result.synthesis_total_span:
             synthesis_result.synthesis_total_span.finish()

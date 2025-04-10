@@ -4,6 +4,7 @@ import sys
 
 from loguru import logger
 from loguru._handler import Handler
+from loguru._logger import context
 
 from vocode import get_serialized_ctx_wrappers
 
@@ -183,3 +184,7 @@ def configure_json_logging() -> None:
         diagnose=False,
         serialize=True,
     )
+
+# Provide a shorthand for copying contextvars into another logger instance
+def copy_logger_context() -> dict:
+    return context.get()  # Defaults to {} as defined in Loguru

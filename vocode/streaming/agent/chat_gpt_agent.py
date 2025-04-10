@@ -220,6 +220,7 @@ class ChatGPTAgent(RespondAgent[ChatGPTAgentConfigType]):
         else:
             chat_parameters = self.get_chat_parameters()
         chat_parameters["stream"] = True
+        chat_parameters["stream_options"] = {"include_usage": True}
 
         openai_chat_messages: List = chat_parameters.get("messages", [])
 

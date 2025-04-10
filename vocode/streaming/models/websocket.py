@@ -26,8 +26,13 @@ class WebSocketMessage(TypedModel, type=WebSocketMessageType.BASE):  # type: ign
     pass
 
 
-class AudioMessage(WebSocketMessage, type=WebSocketMessageType.AUDIO):  # type: ignore
+class LipsyncEvent(TypedModel):
+    audio_offset: float
+    viseme_id: str
+
+class AudioMessage(WebSocketMessage, type=WebSocketMessageType.AUDIO):
     data: str
+    lipsync_events: Optional[list[LipsyncEvent]] = None
 
     @classmethod
     def from_bytes(cls, chunk: bytes):
@@ -41,10 +46,11 @@ class TranscriptMessage(WebSocketMessage, type=WebSocketMessageType.TRANSCRIPT):
     text: str
     sender: Sender
     timestamp: float
+    metadata: Optional[dict] = None
 
     @classmethod
     def from_event(cls, event: TranscriptEvent):
-        return cls(text=event.text, sender=event.sender, timestamp=event.timestamp)
+        return cls(text=event.text, sender=event.sender, timestamp=event.timestamp, metadata=event.metadata)
 
 
 class StartMessage(WebSocketMessage, type=WebSocketMessageType.START):  # type: ignore

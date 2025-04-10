@@ -81,6 +81,7 @@ class SynthesisResult:
         self,
         chunk_generator: AsyncGenerator[ChunkResult, None],
         get_message_up_to: Callable[[Optional[float]], str],
+        get_lipsync_events: Callable[[float, float], list] = None,
         cached: bool = False,
         is_first: bool = False,
         synthesis_total_span: Optional[SentrySpan] = None,
@@ -88,6 +89,7 @@ class SynthesisResult:
     ):
         self.chunk_generator = chunk_generator
         self.get_message_up_to = get_message_up_to
+        self.get_lipsync_events = get_lipsync_events
         self.cached = cached
         self.is_first = is_first
         self.synthesis_total_span = synthesis_total_span

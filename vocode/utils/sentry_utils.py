@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
 import sentry_sdk
 from loguru import logger
 from sentry_sdk.tracing import Span, Transaction, _SpanRecorder
-
 from vocode import get_serialized_ctx_wrappers, sentry_transaction
 
 if TYPE_CHECKING:
@@ -230,6 +229,7 @@ class SpanRecorder(_SpanRecorder):
         self._auto_spans = []
         self._custom_spans = []
         self._low_prio_spans = []
+        self.dropped_spans = 0  # type: int
 
     def add(self, span: Span):
         if span.op in _FILTERED_SPANS and span.description in _FILTERED_SPANS:

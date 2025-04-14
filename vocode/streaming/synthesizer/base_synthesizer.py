@@ -22,7 +22,6 @@ from loguru import logger
 from nltk.tokenize import word_tokenize
 from nltk.tokenize.treebank import TreebankWordDetokenizer
 from sentry_sdk.tracing import Span as SentrySpan
-
 from vocode.streaming.models.agent import FillerAudioConfig
 from vocode.streaming.models.audio import AudioEncoding, SamplingRate
 from vocode.streaming.models.message import BaseMessage, BotBackchannel, SilenceMessage
@@ -63,6 +62,24 @@ def encode_as_wav(chunk: bytes, synthesizer_config: SynthesizerConfig) -> bytes:
     output_bytes_io.seek(0)
     return output_bytes_io.read()
 
+
+def get_lipsync_events(from_s: float, to_s: float, lipsync_events: list) -> list:
+    if not lipsync_events:
+        return []
+    if to_s is None:
+        to_s = 10000
+    if from_s is None:
+        from_s = 0
+
+    events = [
+        {
+            "audio_offset": event["audio_offset"] - from_s,
+            "viseme_id": event["viseme_id"],
+        }
+        for event in lipsync_events
+        if event["audio_offset"] and from_s <= event["audio_offset"] < to_s
+    ]
+    return events
 
 class SynthesisResult:
     """Holds audio bytes for an utterance and method to know how much of utterance was spoken
@@ -328,7 +345,12 @@ class BaseSynthesizer(Generic[SynthesizerConfigType]):
 
         words_per_second = words_per_minute / 60
         estimated_words_spoken = math.floor(words_per_second * seconds)
-        tokens = word_tokenize(message.text)
+        try:
+            tokens = word_tokenize(message.text)
+        except LookupError:
+            logger.warning(
+                "NLTK punkt tokenizer not found. Falling back to simple split for detokenization.")
+            tokens = message.text.split()
         return TreebankWordDetokenizer().detokenize(tokens[:estimated_words_spoken])
 
     async def get_cached_audio(

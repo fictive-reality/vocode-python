@@ -6,17 +6,23 @@ import sentry_sdk
 from loguru import logger
 from openai import DEFAULT_MAX_RETRIES as OPENAI_DEFAULT_MAX_RETRIES
 from openai import AsyncAzureOpenAI, AsyncOpenAI, NotFoundError, RateLimitError
-
 from vocode import sentry_span_tags
 from vocode.streaming.action.abstract_factory import AbstractActionFactory
 from vocode.streaming.action.default_factory import DefaultActionFactory
-from vocode.streaming.agent.base_agent import GeneratedResponse, RespondAgent, StreamedResponse
+from vocode.streaming.agent.base_agent import (
+    GeneratedResponse,
+    RespondAgent,
+    StreamedResponse,
+)
 from vocode.streaming.agent.openai_utils import (
     format_openai_chat_messages_from_transcript,
     openai_get_tokens,
     vector_db_result_to_openai_chat_message,
 )
-from vocode.streaming.agent.streaming_utils import collate_response_async, stream_response_async
+from vocode.streaming.agent.streaming_utils import (
+    collate_response_async,
+    stream_response_async,
+)
 from vocode.streaming.models.actions import FunctionCallActionTrigger
 from vocode.streaming.models.agent import ChatGPTAgentConfig
 from vocode.streaming.models.events import Sender
@@ -262,7 +268,7 @@ class ChatGPTAgent(RespondAgent[ChatGPTAgentConfigType]):
 
         response_generator = collate_response_async
         using_input_streaming_synthesizer = (
-            self.conversation_state_manager.using_input_streaming_synthesizer()
+            getattr(self, "conversation_state_manager", None) and self.conversation_state_manager.using_input_streaming_synthesizer()
         )
         if using_input_streaming_synthesizer:
             response_generator = stream_response_async

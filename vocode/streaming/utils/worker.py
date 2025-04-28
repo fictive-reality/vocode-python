@@ -7,7 +7,6 @@ from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 import janus
 from loguru import logger
-
 from vocode.streaming.utils.create_task import asyncio_create_task
 
 WorkerInputType = TypeVar("WorkerInputType")
@@ -209,6 +208,7 @@ class InterruptibleWorker(AsyncWorker[InterruptibleEventType]):
             try:
                 item = await self._input_queue.get()
             except asyncio.CancelledError:
+                logger.debug(f"Ending worker {type(self)} the queue waiting was cancelled")
                 return
 
             if item.is_interrupted():
@@ -221,7 +221,7 @@ class InterruptibleWorker(AsyncWorker[InterruptibleEventType]):
             try:
                 await self.current_task
             except asyncio.CancelledError:
-                return
+                pass # If current_task is cancelled, e.g. from broadcast_interrupt. Keep processing.
             except Exception:
                 logger.exception("InterruptibleWorker", exc_info=True)
             self.interruptible_event.is_interruptible = False

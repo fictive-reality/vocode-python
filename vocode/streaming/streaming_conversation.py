@@ -23,7 +23,6 @@ from typing import (
 import sentry_sdk
 from loguru import logger
 from sentry_sdk.tracing import Span
-
 from vocode import conversation_id as ctx_conversation_id
 from vocode.streaming.action.worker import ActionsWorker
 from vocode.streaming.agent.base_agent import (
@@ -44,9 +43,19 @@ from vocode.streaming.constants import (
 from vocode.streaming.models.actions import EndOfTurn
 from vocode.streaming.models.agent import FillerAudioConfig
 from vocode.streaming.models.events import Sender
-from vocode.streaming.models.message import BaseMessage, BotBackchannel, LLMToken, SilenceMessage
+from vocode.streaming.models.message import (
+    BaseMessage,
+    BotBackchannel,
+    LLMToken,
+    SilenceMessage,
+)
 from vocode.streaming.models.transcriber import TranscriberConfig, Transcription
-from vocode.streaming.models.transcript import Message, Transcript, TranscriptCompleteEvent, TranscriptEvent
+from vocode.streaming.models.transcript import (
+    Message,
+    Transcript,
+    TranscriptCompleteEvent,
+    TranscriptEvent,
+)
 from vocode.streaming.output_device.abstract_output_device import AbstractOutputDevice
 from vocode.streaming.output_device.audio_chunk import AudioChunk, ChunkState
 from vocode.streaming.synthesizer.base_synthesizer import (
@@ -54,7 +63,9 @@ from vocode.streaming.synthesizer.base_synthesizer import (
     FillerAudio,
     SynthesisResult,
 )
-from vocode.streaming.synthesizer.input_streaming_synthesizer import InputStreamingSynthesizer
+from vocode.streaming.synthesizer.input_streaming_synthesizer import (
+    InputStreamingSynthesizer,
+)
 from vocode.streaming.transcriber.base_transcriber import BaseTranscriber
 from vocode.streaming.transcriber.deepgram_transcriber import DeepgramTranscriber
 from vocode.streaming.utils import (
@@ -249,6 +260,7 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
             if self.ignore_next_message and transcription.is_final:
                 # TODO: delete this once transcription reset is implemented for processing conference voicemail
                 # Push human message to transcript but do not respond
+                logger.debug("Ignoring this human transcription due to `ignore_next_message`")
                 self.has_associated_ignored_utterance = False
                 agent_response_tracker = None
                 self.ignore_next_message = False
@@ -270,6 +282,7 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
                     )
                 )
             if not self.conversation.is_human_speaking:
+                logger.debug("Human started speaking")
                 self.conversation.current_transcription_is_interrupt = (
                     await self.conversation.broadcast_interrupt()
                 )
@@ -279,7 +292,6 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
                         f"Interrupting transcription: {transcription.message}, confidence: {transcription.confidence}"
                     )
                     # logger.debug("sent interrupt")
-                logger.debug("Human started speaking")
                 self.conversation.is_human_still_there = True
 
             transcription.is_interrupt = self.conversation.current_transcription_is_interrupt
@@ -289,6 +301,7 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
                 # If no duration, it's a text message and we don't need to handle the audio
                 if transcription.duration_seconds is not None:
                     file_path = f"cache/{self.conversation.id}/transcript_{len(self.conversation.transcript.event_logs)}.wav"
+                    transcription.path = file_path
                     t_config = self.conversation.transcriber.get_transcriber_config()
                     save_as_wav(
                         file_path,
@@ -327,21 +340,7 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
                 self.conversation.speed_manager.update(transcription)
 
                 self.conversation.warmup_synthesizer()
-
-                # Note, in upstream add_human_message is called in BaseAgent, but there we don't
-                # have access to the audio file path. So we moved it back, but it would break if we use
-                # ActionAgents
-                self.conversation.transcript.add_human_message(
-                    text=transcription.message,
-                    conversation_id=self.conversation.id,
-                    metadata={
-                        "confidence": transcription.confidence,
-                        "is_interrupt": transcription.is_interrupt,
-                        "path": file_path,
-                        "duration": transcription.duration_seconds,
-                        "is_final": True
-                    },
-                )
+                
                 # we use getattr here to avoid the dependency cycle between PhoneConversation and StreamingConversation
                 event = self.interruptible_event_factory.create_interruptible_event(
                     TranscriptionAgentInput(
@@ -590,19 +589,14 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
                 metadata = message.metadata or {}
                 metadata["is_final"] = False
 
-                # create an empty transcript message and attach it to the transcript
+                # create an empty transcript message
                 transcript_message = Message(
                     text="",
                     sender=Sender.BOT,
                     is_backchannel=isinstance(message, BotBackchannel),
                     metadata=metadata
                 )
-                if not isinstance(message, SilenceMessage):
-                    self.conversation.transcript.add_message(
-                        message=transcript_message,
-                        conversation_id=self.conversation.id,
-                        publish_to_events_manager=False,
-                    )
+
                 if isinstance(message, SilenceMessage):
                     logger.debug(f"Sending {message.trailing_silence_seconds} seconds of silence")
                 elif isinstance(message, BotBackchannel):
@@ -621,6 +615,14 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
                     if not message_sent:
                         logger.debug("Cut off message was empty, not sending to transcript")
                         return
+                
+                # Add to transcript only after we know the actual message sent
+                if not isinstance(message, SilenceMessage):
+                    self.conversation.transcript.add_message(
+                        message=transcript_message,
+                        conversation_id=self.conversation.id,
+                        publish_to_events_manager=False,
+                    )
                 logger.debug("Bot response sent: {}".format(message_sent))
                 self.last_transcript_message = transcript_message
 
@@ -1019,8 +1021,14 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
         if self.transcriber.get_transcriber_config().mute_during_speech:
             logger.debug("Muting transcriber")
             self.transcriber.mute()
-        logger.debug(f"Start sending speech {message} to output")
 
+        time_since_human_started_speaking = self.transcript.time_since_human_started_speaking()
+        if time_since_human_started_speaking > 10:
+            wait_time = max(0, self.agent.get_agent_config().wait_time_for_long_transcription_seconds or 1.0)
+            logger.debug(f"Detected human spoke for long (started {time_since_human_started_speaking:.2g}s ago) , waiting {wait_time}s extra for interruption to come in")
+            await asyncio.sleep(wait_time)
+        else:
+            logger.debug(f"Detected human spoke for {time_since_human_started_speaking:.2g}s, so not waiting extra for interruption to come in")
         first_chunk_span = self._maybe_create_first_chunk_span(synthesis_result, message)
         audio_chunks: List[AudioChunk] = []
         processed_events: List[asyncio.Event] = []
@@ -1042,6 +1050,8 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
             )
             # Prevents the case where we send a chunk after the output device has been interrupted
             async with self.interrupt_lock:
+                if len(audio_chunks) == 0:
+                    logger.debug(f"Sending first chunk of '{message}' to output")
                 self.output_device.consume_nonblocking(
                     InterruptibleEvent(
                         payload=audio_chunk,
@@ -1053,10 +1063,6 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
             processed_events.append(processed_event)
 
         await synthesis_result.chunk_generator.aclose()
-        if interrupted_before_all_chunks_sent:
-            logger.debug("Interrupted before all chunks were sent")
-        else:
-            logger.debug(f"Finished sending {len(audio_chunks)} chunks to the output device")
 
         if processed_events:
             await processed_events[-1].wait()
@@ -1072,6 +1078,13 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
         cut_off = (
             interrupted_before_all_chunks_sent or maybe_first_interrupted_audio_chunk is not None
         )
+        if cut_off:
+            logger.debug(f"Interrupted before all chunks were sent (probably sent out {len([audio_chunk
+                for audio_chunk in audio_chunks
+                if audio_chunk.state == ChunkState.PLAYED])} chunks)")
+        else:
+            logger.debug(f"Finished sending {len(audio_chunks)} chunks to the output device")
+
         if (
             transcript_message and not cut_off
         ):  # if the audio was not cut off, we can set the transcript message to the full message

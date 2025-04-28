@@ -134,7 +134,7 @@ class SentryConfiguredContextManager:
         if self.is_configured:
             return self.func(*self.args, **self.kwargs)
         else:
-            logger.debug("Sentry is not configured, skipping function execution.")
+            #logger.debug("Sentry is not configured, skipping function execution.")
             return None
 
     def execute(self) -> Optional[Any]:

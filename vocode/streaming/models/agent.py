@@ -2,7 +2,6 @@ from enum import Enum
 from typing import List, Literal, Optional, Union
 
 from pydantic.v1 import validator
-
 from vocode.streaming.models.actions import ActionConfig
 from vocode.streaming.models.message import BaseMessage
 
@@ -104,6 +103,7 @@ class AgentConfig(TypedModel, type=AgentType.BASE.value):  # type: ignore
     goodbye_phrases: Optional[List[str]] = None
     interrupt_sensitivity: InterruptSensitivity = "low"
     cut_off_response: Optional[CutOffResponse] = None
+    wait_time_for_long_transcription_seconds: Optional[float] = None
 
 
 class LLMAgentConfig(AgentConfig, type=AgentType.LLM.value):  # type: ignore

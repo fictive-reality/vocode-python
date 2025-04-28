@@ -247,8 +247,9 @@ class RespondAgent(BaseAgent[AgentConfigType]):
     async def handle_generate_response(
         self,
         transcription: Transcription,
-        agent_input: AgentInput,
+        agent_input_event: InterruptibleEvent[AgentInput],
     ) -> bool:
+        agent_input = agent_input_event.payload
         conversation_id = agent_input.conversation_id
         responses = self._maybe_prepend_interrupt_responses(
             transcription=transcription,
@@ -292,17 +293,20 @@ class RespondAgent(BaseAgent[AgentConfigType]):
                 continue
 
             agent_response_tracker = agent_input.agent_response_tracker or asyncio.Event()
-            self.agent_responses_consumer.consume_nonblocking(
-                self.interruptible_event_factory.create_interruptible_agent_response_event(
-                    AgentResponseMessage(
-                        message=generated_response.message,
-                        is_first=is_first_response_of_turn,
+            if not agent_input_event.is_interrupted():
+                self.agent_responses_consumer.consume_nonblocking(
+                    self.interruptible_event_factory.create_interruptible_agent_response_event(
+                        AgentResponseMessage(
+                            message=generated_response.message,
+                            is_first=is_first_response_of_turn,
+                        ),
+                        is_interruptible=self.agent_config.allow_agent_to_be_cut_off
+                        and generated_response.is_interruptible,
+                        agent_response_tracker=agent_response_tracker,
                     ),
-                    is_interruptible=self.agent_config.allow_agent_to_be_cut_off
-                    and generated_response.is_interruptible,
-                    agent_response_tracker=agent_response_tracker,
-                ),
-            )
+                )
+            else:
+                logger.debug(f"Skipping agent response '{generated_response.message}' because the input was interrupted")
             if isinstance(generated_response.message, BaseMessage):
                 responses_buffer = f"{responses_buffer} {generated_response.message.text}"
             elif isinstance(generated_response.message, EndOfTurn):
@@ -390,13 +394,18 @@ class RespondAgent(BaseAgent[AgentConfigType]):
         try:
             agent_input = item.payload
             if isinstance(agent_input, TranscriptionAgentInput):
-                pass
                 transcription = typing.cast(TranscriptionAgentInput, agent_input).transcription
-                # We are doing this in TranscriptionWorker instead to more easily add metadata
-                # self.transcript.add_human_message(
-                #     text=transcription.message,
-                #     conversation_id=agent_input.conversation_id,
-                # )
+                self.transcript.add_human_message(
+                    text=transcription.message,
+                    conversation_id=agent_input.conversation_id,
+                    metadata={
+                        "confidence": transcription.confidence,
+                        "is_interrupt": transcription.is_interrupt,
+                        "path": transcription.path,
+                        "duration": transcription.duration_seconds,
+                        "is_final": True
+                    },
+                )
             elif isinstance(agent_input, ActionResultAgentInput):
                 self.transcript.add_action_finish_log(
                     action_input=agent_input.action_input,
@@ -451,7 +460,7 @@ class RespondAgent(BaseAgent[AgentConfigType]):
                         sentry_callable=sentry_sdk.start_span,
                         op=CustomSentrySpans.LANGUAGE_MODEL_TIME_TO_FIRST_TOKEN,
                     )
-                should_stop = await self.handle_generate_response(transcription, agent_input)
+                should_stop = await self.handle_generate_response(transcription, item)
             else:
                 should_stop = await self.handle_respond(transcription, agent_input.conversation_id)
 

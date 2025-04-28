@@ -174,6 +174,7 @@ class Transcription(BaseModel):
     bot_was_in_medias_res: bool = False
     duration_seconds: Optional[float] = None  # gets added only on final transcription
     offset_seconds: float = 0
+    path: Optional[str] = None
 
     def __str__(self):
         return (

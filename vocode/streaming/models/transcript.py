@@ -171,10 +171,10 @@ class Transcript(BaseModel):
         publish_to_events_manager: bool = True,
     ):
         metadata = metadata or {}
-        duration = metadata.get("duration", 0) if metadata else 0
+        duration = metadata.get("duration") or 0 if metadata else 0
         # Current time is when a message has been finished transcribing/synthesizing, so
         # timestamp of the start must be calculated by subtracting the duration
-        timestamp = time.time()
+        timestamp = time.time() - duration
         message = Message(
             text=text,
             sender=sender,

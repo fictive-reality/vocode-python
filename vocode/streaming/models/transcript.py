@@ -1,9 +1,9 @@
 import time
+import uuid
 from datetime import datetime
 from typing import List, Literal, Optional
 
 from pydantic.v1 import BaseModel, Field
-
 from vocode.streaming.models.actions import ActionInput, ActionOutput
 from vocode.streaming.models.events import ActionEvent, Event, EventType, Sender
 from vocode.streaming.utils.events_manager import EventsManager
@@ -20,13 +20,15 @@ class EventLog(BaseModel):
         dt = datetime.fromtimestamp(self.timestamp - start_timestamp)
         return f"[{dt.strftime('%M:%S')}.{dt.microsecond // 10000:02}]"
 
+class OtherEvent(EventLog):
+    metadata: dict = {}
 
-class Message(EventLog):
+
+class Message(OtherEvent):
     text: str
     is_final: bool = False
     is_backchannel: bool = False
     is_end_of_turn: bool = False
-    metadata: dict = {}
 
     def to_string(
         self,
@@ -148,11 +150,11 @@ class Transcript(BaseModel):
     def attach_events_manager(self, events_manager: EventsManager):
         self.events_manager = events_manager
 
-    def maybe_publish_transcript_event_from_message(self, message: Message, conversation_id: str):
+    def maybe_publish_transcript_event_from_message(self, message: Message | OtherEvent, conversation_id: str):
         if self.events_manager is not None:
             self.events_manager.publish_event(
                 TranscriptEvent(
-                    text=message.text,
+                    text=getattr(message, "text", ""),
                     sender=message.sender,
                     timestamp=message.timestamp,
                     conversation_id=conversation_id,
@@ -160,21 +162,32 @@ class Transcript(BaseModel):
                 )
             )
 
-    def add_message_from_props(
-        self,
+    @staticmethod
+    def create_message(
         text: str,
         sender: Sender,
-        conversation_id: str,
         is_final: bool = False,
         is_backchannel: bool = False,
         metadata: Optional[dict] = None,
-        publish_to_events_manager: bool = True,
-    ):
+    ) -> Message:
         metadata = metadata or {}
         duration = metadata.get("duration") or 0 if metadata else 0
-        # Current time is when a message has been finished transcribing/synthesizing, so
-        # timestamp of the start must be calculated by subtracting the duration
-        timestamp = time.time() - duration
+        # Some FictiveReality specific fields here, but best place to put it currently
+        if metadata.get("timestamp"):
+            # We expect metadata e.g. SessionEvent timestamp to be in milliseconds
+            timestamp = metadata["timestamp"] / 1000
+        else:
+            # Current time is when a message has been finished transcribing/synthesizing, so
+            # timestamp of the start must be calculated by subtracting the duration
+            timestamp = time.time() - duration
+            metadata["timestamp"] = int(timestamp * 1000)
+        if not metadata.get("id"):
+            metadata["id"] = str(uuid.uuid4())
+        metadata["role"] = "player" if sender == Sender.HUMAN else "bot"
+        metadata["status"] = "final" if is_final else "inProgress"
+        # TODO check for backchannel if we add that eventType
+        if not metadata.get("eventType"):
+            metadata["eventType"] = "BOT_LINE" if sender == Sender.BOT else "PLAYER_LINE"
         message = Message(
             text=text,
             sender=sender,
@@ -183,15 +196,11 @@ class Transcript(BaseModel):
             is_backchannel=is_backchannel,
             metadata=metadata
         )
-        self.event_logs.append(message)
-        if publish_to_events_manager:
-            self.maybe_publish_transcript_event_from_message(
-                message=message, conversation_id=conversation_id
-            )
+        return message
 
     def add_message(
         self,
-        message: Message,
+        message: EventLog,
         conversation_id: str,
         publish_to_events_manager: bool = True,
     ):
@@ -201,23 +210,24 @@ class Transcript(BaseModel):
                 message=message, conversation_id=conversation_id
             )
 
-    def add_human_message(self, text: str, conversation_id: str, is_backchannel: bool = False, metadata: Optional[dict] = None):
-        self.add_message_from_props(
+    def add_human_message(self, text: str, conversation_id: str, is_backchannel: bool = False, is_final: bool = False, metadata: Optional[dict] = None):
+        msg = self.create_message(
             text=text,
             sender=Sender.HUMAN,
-            conversation_id=conversation_id,
             is_backchannel=is_backchannel,
-            metadata=metadata,
-        )
-
-    def add_bot_message(self, text: str, conversation_id: str, is_final: bool = False, metadata: Optional[dict] = None):
-        self.add_message_from_props(
-            text=text,
-            sender=Sender.BOT,
-            conversation_id=conversation_id,
             is_final=is_final,
             metadata=metadata,
         )
+        self.add_message(msg, conversation_id=conversation_id)
+
+    def add_bot_message(self, text: str, conversation_id: str, is_final: bool = False, metadata: Optional[dict] = None):
+        msg = self.create_message(
+            text=text,
+            sender=Sender.BOT,
+            is_final=is_final,
+            metadata=metadata,
+        )
+        self.add_message(msg, conversation_id=conversation_id)
 
     def get_last_user_message(self):
         for idx, message in enumerate(self.event_logs[::-1]):
@@ -285,13 +295,15 @@ class Transcript(BaseModel):
 
     def time_since_last_human_message(self) -> float:
         for message in self.event_logs[::-1]:
-            if message.sender == Sender.HUMAN:
+            if message.sender == Sender.HUMAN and isinstance(message, Message):
                 return time.time() - message.timestamp
         return -1
 
     def time_since_human_started_speaking(self) -> float:
         human_started_at = None
         for message in self.event_logs[::-1]:
+            if not isinstance(message, Message):
+                continue
             if message.sender == Sender.BOT:
                 if human_started_at:
                     return time.time() - human_started_at

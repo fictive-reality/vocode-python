@@ -586,15 +586,14 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
                     return
                 assert synthesis_result is not None
 
-                metadata = message.metadata or {}
-                metadata["is_final"] = False
-
-                # create an empty transcript message
-                transcript_message = Message(
-                    text="",
-                    sender=Sender.BOT,
+                # create an empty transcript message which we add later to transcript
+                # This is because the message isn't considered confirmed until it's been sent and/or interrupted
+                transcript_message = Transcript.create_message(
+                    text="", 
+                    sender=Sender.BOT, 
                     is_backchannel=isinstance(message, BotBackchannel),
-                    metadata=metadata
+                    is_final=False, 
+                    metadata=message.metadata or {}
                 )
 
                 if isinstance(message, SilenceMessage):
@@ -620,19 +619,12 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
                 if not isinstance(message, SilenceMessage):
                     self.conversation.transcript.add_message(
                         message=transcript_message,
-                        conversation_id=self.conversation.id,
-                        publish_to_events_manager=False,
+                        conversation_id=self.conversation.id
                     )
                 logger.debug("Bot response sent: {}".format(message_sent))
                 self.last_transcript_message = transcript_message
 
-                # publish the transcript message now that it includes what was said during send_speech_to_output
-                self.conversation.transcript.maybe_publish_transcript_event_from_message(
-                    message=transcript_message,
-                    conversation_id=self.conversation.id,
-                )
-
-                if metadata.get("stop"):
+                if transcript_message.metadata.get("stop"):
                     logger.debug("Agent requested to stop")
                     # Shield the call, because when we terminate, a brodacast_interrupt is sent
                     # which in turn cancels this process task
@@ -862,11 +854,12 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
             ),
         )
 
-    def receive_message(self, message: str):
+    def receive_message(self, message: Message):
         transcription = Transcription(
-            message=message,
+            message=message.text,
             confidence=1.0,
-            is_final=True,
+            is_final=True, # TODO incoming message may not be final, check metadata
+            metadata=message.metadata
         )
         self.transcriptions_worker.consume_nonblocking(transcription)
 
@@ -989,20 +982,13 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
                 if transcript_message:
                     partial_text = synthesis_result.get_message_up_to(seconds_spoken)
                     transcript_message.text = partial_text
-                    if last_text != transcript_message.text and hasattr(self.output_device, "send_transcript"):
-                        # logger.debug(f"Sending updated partial transcript '{transcript_message.text}' up to {seconds_spoken}s, chunk {chunk_idx}")
-                        te = TranscriptEvent(
-                            conversation_id=self.id,
-                            text=transcript_message.text,
-                            sender=Sender.BOT,
-                            timestamp=transcript_message.timestamp,
-                            metadata=transcript_message.metadata,
-                        )
+                    if last_text != transcript_message.text and hasattr(self.output_device, "send_partial_transcript"):
+                        id = transcript_message.metadata.get("id")
                         try:
-                            asyncio.create_task(self.output_device.send_transcript(te))
+                            asyncio.create_task(self.output_device.send_partial_transcript(partial_text, id))
                         except Exception as e:
                             logger.error(
-                                f"Error sending transcript message: {e}",
+                                f"Error sending partial transcript message: {e}",
                             )
                         last_text = transcript_message.text
 
@@ -1111,10 +1097,10 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
             save_as_wav(file_path, data, sample_rate)
         if transcript_message:
             transcript_message.is_final = True
-            transcript_message.metadata["is_final"] = True
+            transcript_message.metadata["status"] = "final"
             transcript_message.metadata["duration"] = seconds_spoken
             if cut_off:
-                transcript_message.metadata["cut_off"] = cut_off
+                transcript_message.metadata["cutOff"] = cut_off
             if file_path:
                 transcript_message.metadata["path"] = file_path
         message_sent = transcript_message.text if transcript_message and cut_off else message

@@ -291,9 +291,8 @@ class RespondAgent(BaseAgent[AgentConfigType]):
             if isinstance(generated_response.message, FunctionCall):
                 function_call = generated_response.message
                 continue
-
             agent_response_tracker = agent_input.agent_response_tracker or asyncio.Event()
-            if not agent_input_event.is_interrupted():
+            if not generated_response.is_interruptible or not agent_input_event.is_interrupted():
                 self.agent_responses_consumer.consume_nonblocking(
                     self.interruptible_event_factory.create_interruptible_agent_response_event(
                         AgentResponseMessage(
@@ -307,6 +306,7 @@ class RespondAgent(BaseAgent[AgentConfigType]):
                 )
             else:
                 logger.debug(f"Skipping agent response '{generated_response.message}' because the input was interrupted")
+            
             if isinstance(generated_response.message, BaseMessage):
                 responses_buffer = f"{responses_buffer} {generated_response.message.text}"
             elif isinstance(generated_response.message, EndOfTurn):
@@ -398,12 +398,15 @@ class RespondAgent(BaseAgent[AgentConfigType]):
                 self.transcript.add_human_message(
                     text=transcription.message,
                     conversation_id=agent_input.conversation_id,
+                    is_final=True, # TranscriptionsWorker only sends final transcriptions
                     metadata={
+                        # TODO several non-schema fields on metadata here
                         "confidence": transcription.confidence,
                         "is_interrupt": transcription.is_interrupt,
                         "path": transcription.path,
                         "duration": transcription.duration_seconds,
-                        "is_final": True
+                        # May have metadata from `streaming_conversation@receive_message()`, will replace
+                        **(transcription.metadata or {}),
                     },
                 )
             elif isinstance(agent_input, ActionResultAgentInput):

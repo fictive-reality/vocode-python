@@ -1,9 +1,8 @@
 from enum import Enum
 from typing import List, Optional
 
-from pydantic.v1 import validator
-
 import vocode.streaming.livekit.constants as LiveKitConstants
+from pydantic.v1 import validator
 from vocode.streaming.input_device.base_input_device import BaseInputDevice
 from vocode.streaming.models.client_backend import InputAudioConfig
 from vocode.streaming.models.model import BaseModel
@@ -175,6 +174,7 @@ class Transcription(BaseModel):
     duration_seconds: Optional[float] = None  # gets added only on final transcription
     offset_seconds: float = 0
     path: Optional[str] = None
+    metadata: Optional[dict] = None
 
     def __str__(self):
         return (
